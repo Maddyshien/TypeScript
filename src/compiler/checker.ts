@@ -10330,7 +10330,6 @@ module ts {
                     return true;
                 }
             }
-            return forEachChild(node, isReferencedImportDeclaration);
         }
 
         function isImplementationOfOverload(node: FunctionLikeDeclaration) {
