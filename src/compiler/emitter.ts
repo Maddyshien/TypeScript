@@ -4294,6 +4294,7 @@ module ts {
             }
 
             function emitAMDModule(node: SourceFile, startIndex: number) {
+                createExternalImports(node);
                 writeLine();
                 write("define(");
                 if (node.amdModuleName) {
@@ -4327,9 +4328,7 @@ module ts {
                 });
                 write(") {");
                 increaseIndent();
-                emitCaptureThisForNodeIfNecessary(node);
-                emitLinesStartingAt(node.statements, startIndex);
-                emitTempDeclarations(/*newLine*/ true);
+                emitSourceFileStatements(node, startIndex);
                 var exportName = resolver.getExportAssignmentName(node);
                 if (exportName) {
                     writeLine();
@@ -4348,9 +4347,8 @@ module ts {
             }
 
             function emitCommonJSModule(node: SourceFile, startIndex: number) {
-                emitCaptureThisForNodeIfNecessary(node);
-                emitLinesStartingAt(node.statements, startIndex);
-                emitTempDeclarations(/*newLine*/ true);
+                createExternalImports(node);
+                emitSourceFileStatements(node, startIndex);
                 var exportName = resolver.getExportAssignmentName(node);
                 if (exportName) {
                     writeLine();
@@ -4363,6 +4361,12 @@ module ts {
                     write(";");
                     emitEnd(exportAssignment);
                 }
+            }
+
+            function emitSourceFileStatements(node: SourceFile, startIndex: number) {
+                emitCaptureThisForNodeIfNecessary(node);
+                emitLinesStartingAt(node.statements, startIndex);
+                emitTempDeclarations(/*newLine*/ true);
             }
 
             function emitDirectivePrologues(statements: Node[], startWithNewLine: boolean): number {
@@ -4407,18 +4411,18 @@ module ts {
                     extendsEmitted = true;
                 }
                 if (isExternalModule(node)) {
-                    createExternalImports(node);
                     if (compilerOptions.module === ModuleKind.AMD) {
                         emitAMDModule(node, startIndex);
                     }
-                    else {
+                    else if (compilerOptions.module === ModuleKind.CommonJS || compilerOptions.target < ScriptTarget.ES6) {
                         emitCommonJSModule(node, startIndex);
+                    }
+                    else {
+                        emitSourceFileStatements(node, startIndex);
                     }
                 }
                 else {
-                    emitCaptureThisForNodeIfNecessary(node);
-                    emitLinesStartingAt(node.statements, startIndex);
-                    emitTempDeclarations(/*newLine*/ true);
+                    emitSourceFileStatements(node, startIndex);
                 }
 
                 emitLeadingComments(node.endOfFileToken);
