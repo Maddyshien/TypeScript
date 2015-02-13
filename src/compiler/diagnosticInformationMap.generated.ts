@@ -150,6 +150,7 @@ module ts {
         An_import_declaration_cannot_have_modifiers: { code: 1188, category: DiagnosticCategory.Error, key: "An import declaration cannot have modifiers." },
         External_module_0_has_no_default_export_or_export_assignment: { code: 1189, category: DiagnosticCategory.Error, key: "External module '{0}' has no default export or export assignment." },
         Deprecated_syntax: { code: 1190, category: DiagnosticCategory.Error, key: "Deprecated syntax" },
+        Cannot_compile_external_modules_into_amd_or_commonjs_when_targeting_es6_or_higher: { code: 1191, category: DiagnosticCategory.Error, key: "Cannot compile external modules into amd or commonjs when targeting es6 or higher." },
         Duplicate_identifier_0: { code: 2300, category: DiagnosticCategory.Error, key: "Duplicate identifier '{0}'." },
         Initializer_of_instance_member_variable_0_cannot_reference_identifier_1_declared_in_the_constructor: { code: 2301, category: DiagnosticCategory.Error, key: "Initializer of instance member variable '{0}' cannot reference identifier '{1}' declared in the constructor." },
         Static_members_cannot_reference_class_type_parameters: { code: 2302, category: DiagnosticCategory.Error, key: "Static members cannot reference class type parameters." },
