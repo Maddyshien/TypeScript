@@ -9432,6 +9432,10 @@ module ts {
                 }
             }
             else {
+                if (compilerOptions.target >= ScriptTarget.ES6) {
+                    // Import equals declaration is deprecated in es6 or above
+                    grammarErrorOnNode(node, Diagnostics.Deprecated_syntax);
+                }
                 if (checkExternalImportDeclaration(node)) {
                     checkImportBinding(node);
                 }
