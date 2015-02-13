@@ -4179,7 +4179,7 @@ module ts {
             }
 
             function emitImportDeclaration(node: ImportDeclaration) {
-                if (isAMDOrCommonjsGen(compilerOptions)) {
+                if (isAMDOrCommonjsGen(compilerOptions, languageVersion)) {
                     return emitExternalImportDeclaration(node);
                 }
 
@@ -4223,8 +4223,6 @@ module ts {
                     emit(node.moduleSpecifier);
                     write(";");
                 }
-
-
             }
 
             function hasReferencedNamedBindings(importClause: ImportClause) {
@@ -4240,7 +4238,7 @@ module ts {
             }
 
             function emitImportSpecifier(node: ImportSpecifier) {
-                Debug.assert(compilerOptions.target >= ScriptTarget.ES6);
+                Debug.assert(!isAMDOrCommonjsGen(compilerOptions, languageVersion));
                 if (node.propertyName) {
                     emit(node.propertyName);
                     write(" as ");
@@ -4499,7 +4497,7 @@ module ts {
                     if (compilerOptions.module === ModuleKind.AMD) {
                         emitAMDModule(node, startIndex);
                     }
-                    else if (compilerOptions.module === ModuleKind.CommonJS || compilerOptions.target < ScriptTarget.ES6) {
+                    else if (compilerOptions.module === ModuleKind.CommonJS || languageVersion < ScriptTarget.ES6) {
                         emitCommonJSModule(node, startIndex);
                     }
                     else {

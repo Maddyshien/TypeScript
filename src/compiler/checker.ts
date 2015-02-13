@@ -9432,7 +9432,7 @@ module ts {
                 }
             }
             else {
-                if (compilerOptions.target >= ScriptTarget.ES6) {
+                if (languageVersion >= ScriptTarget.ES6) {
                     // Import equals declaration is deprecated in es6 or above
                     grammarErrorOnNode(node, Diagnostics.Deprecated_syntax);
                 }
@@ -9447,7 +9447,7 @@ module ts {
             if (!checkGrammarModifiers(node) && (node.flags & NodeFlags.Modifier)) {
                 grammarErrorOnFirstToken(node, Diagnostics.An_export_assignment_cannot_have_modifiers);
             }
-            if (compilerOptions.target >= ScriptTarget.ES6) {
+            if (languageVersion >= ScriptTarget.ES6) {
                 // export assignment is deprecated in es6 or above
                 grammarErrorOnNode(node, Diagnostics.Deprecated_syntax);
             }
