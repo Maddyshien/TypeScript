@@ -3218,8 +3218,13 @@ module ts {
                 emitStart(node.name);
                 if (getCombinedNodeFlags(node) & NodeFlags.Export) {
                     var container = getContainingModule(node);
-                    write(container ? resolver.getGeneratedNameForNode(container) : "exports");
-                    write(".");
+                    if (container) {
+                        write(resolver.getGeneratedNameForNode(container));
+                        write(".");
+                    }
+                    else if (isAMDOrCommonjsGen(compilerOptions, languageVersion)) {
+                        write("exports.");
+                    }
                 }
                 emitNode(node.name);
                 emitEnd(node.name);
