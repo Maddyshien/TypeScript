@@ -1761,6 +1761,8 @@ module ts {
             /** Sourcemap data that will get encoded */
             var sourceMapData: SourceMapData;
 
+            var generateAmdOrCommonjsModule = isAMDOrCommonjsGen(compilerOptions, languageVersion);
+
             if (compilerOptions.sourceMap) {
                 initializeEmitterWithSourceMaps();
             }
@@ -3222,7 +3224,7 @@ module ts {
                         write(resolver.getGeneratedNameForNode(container));
                         write(".");
                     }
-                    else if (isAMDOrCommonjsGen(compilerOptions, languageVersion)) {
+                    else if (generateAmdOrCommonjsModule) {
                         write("exports.");
                     }
                 }
@@ -3463,7 +3465,12 @@ module ts {
             }
 
             function emitVariableStatement(node: VariableStatement) {
-                if (!(node.flags & NodeFlags.Export)) {
+                if (!(node.flags & NodeFlags.Export) || // Not exported
+                    (!generateAmdOrCommonjsModule && // ES6 module member
+                        node.parent.kind === SyntaxKind.SourceFile)) {
+                    if (node.flags & NodeFlags.Export) {
+                        write("export ");
+                    }
                     if (isLet(node.declarationList)) {
                         write("let ");
                     }
@@ -4184,7 +4191,7 @@ module ts {
             }
 
             function emitImportDeclaration(node: ImportDeclaration) {
-                if (isAMDOrCommonjsGen(compilerOptions, languageVersion)) {
+                if (generateAmdOrCommonjsModule) {
                     return emitExternalImportDeclaration(node);
                 }
 
@@ -4243,7 +4250,7 @@ module ts {
             }
 
             function emitImportSpecifier(node: ImportSpecifier) {
-                Debug.assert(!isAMDOrCommonjsGen(compilerOptions, languageVersion));
+                Debug.assert(!generateAmdOrCommonjsModule);
                 if (node.propertyName) {
                     emit(node.propertyName);
                     write(" as ");
