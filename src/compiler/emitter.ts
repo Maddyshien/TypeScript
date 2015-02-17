@@ -4207,13 +4207,6 @@ module ts {
                 }
             }
 
-            function emitImportAssignment(node: Declaration, moduleName: Expression) {
-                if (!(node.flags & NodeFlags.Export)) write("var ");
-                emitModuleMemberName(<Declaration>node);
-                write(" = ");
-                emitRequire(moduleName);
-            }
-
             function emitImportDeclaration(node: ImportDeclaration) {
                 if (generateAmdOrCommonjsModule) {
                     return emitExternalImportDeclaration(node);
