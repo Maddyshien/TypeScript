@@ -264,8 +264,11 @@ http.createServer(function (req: http.ServerRequest, res: http.ServerResponse) {
 var browserPath: string;
 if ((browser && browser === 'chrome')) {
     var defaultChromePath = "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe";
+    var defaultMacChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
     if (fs.existsSync(defaultChromePath)) {
         browserPath = defaultChromePath;
+    } else if (fs.existsSync(defaultMacChromePath)) {
+        browserPath = defaultMacChromePath;
     } else {
         browserPath = browser;
     }
