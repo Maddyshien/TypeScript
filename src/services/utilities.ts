@@ -1,6 +1,17 @@
 // These utilities are common to multiple language service features.
 /* @internal */
 namespace ts {
+    export interface Plugin {
+        version: string;
+        getCompletionsAtPosition?(fileName: string, position: number): CompletionInfo;
+    }
+
+    interface PluginFactory {
+        (program: Program): Plugin;
+    }
+
+    export var pluginFactories: PluginFactory[] = [];
+
     export interface ListItemInfo {
         listItemIndex: number;
         list: Node;
@@ -257,14 +268,14 @@ namespace ts {
         return syntaxList;
     }
 
-    /* Gets the token whose text has range [start, end) and 
+    /* Gets the token whose text has range [start, end) and
      * position >= start and (position < end or (position === end && token is keyword or identifier))
      */
     export function getTouchingWord(sourceFile: SourceFile, position: number): Node {
         return getTouchingToken(sourceFile, position, n => isWord(n.kind));
     }
 
-    /* Gets the token whose text has range [start, end) and position >= start 
+    /* Gets the token whose text has range [start, end) and position >= start
      * and (position < end or (position === end && token is keyword or identifier or numeric\string litera))
      */
     export function getTouchingPropertyName(sourceFile: SourceFile, position: number): Node {
@@ -391,8 +402,8 @@ namespace ts {
                     const start = child.getStart(sourceFile);
                     const lookInPreviousChild =
                         (start >= position) || // cursor in the leading trivia
-                        (child.kind === SyntaxKind.JsxText && start === child.end); // whitespace only JsxText 
-                    
+                        (child.kind === SyntaxKind.JsxText && start === child.end); // whitespace only JsxText
+
                     if (lookInPreviousChild) {
                         // actual start of the node is past the position - previous token should be at the end of previous child
                         let candidate = findRightmostChildNodeWithTokens(children, /*exclusiveStartPosition*/ i);
@@ -407,7 +418,7 @@ namespace ts {
 
             Debug.assert(startNode !== undefined || n.kind === SyntaxKind.SourceFile);
 
-            // Here we know that none of child token nodes embrace the position, 
+            // Here we know that none of child token nodes embrace the position,
             // the only known case is when position is at the end of the file.
             // Try to find the rightmost token in the file without filtering.
             // Namely we are skipping the check: 'position < node.end'
@@ -445,7 +456,7 @@ namespace ts {
 
         if (token && position <= token.getStart()) {
             let commentRanges = getLeadingCommentRanges(sourceFile.text, token.pos);
-                
+
             // The end marker of a single-line comment does not include the newline character.
             // In the following case, we are inside a comment (^ denotes the cursor position):
             //

@@ -91,7 +91,8 @@ var servicesSources = [
     "formatting/rulesMap.ts",
     "formatting/rulesProvider.ts",
     "formatting/smartIndenter.ts",
-    "formatting/tokenRange.ts"
+    "formatting/tokenRange.ts",
+    "plugin-ngml.ts"
 ].map(function (f) {
     return path.join(servicesDirectory, f);
 }));
