@@ -3846,8 +3846,59 @@ namespace ts {
             }
         }
 
-
         function getCompletionsAtPosition(fileName: string, position: number): CompletionInfo {
+            let result = getTypeScriptCompletionsAtPosition(fileName, position);
+
+            if(!result){
+                result = getNgTemplateCompletionsAtPosition(fileName, position);
+            }
+            return result;
+        }
+
+        function getNgTemplateCompletionsAtPosition(fileName: string, position: number): CompletionInfo {
+            // TODO: getCompletionEntryDetails needs to be wired up also
+            let typeChecker = program.getTypeChecker();
+            let sourceFile = getValidSourceFile(fileName);
+            let isJavaScriptFile = isJavaScript(fileName);
+            let currentToken = getTokenAtPosition(sourceFile, position);
+            
+            // TODO: Probably needs to handle multi-part tokens (e.g. contains expressions)
+            if(currentToken.kind !== SyntaxKind.FirstTemplateToken){
+                return undefined;
+            }
+            var elements: CompletionEntry[] = ["div", "span", "p", "h1", "h2", "img"].map( name => ({
+                name,
+                kind: ScriptElementKind.classElement,
+                kindModifiers: "",
+                sortText: "0"
+            }));
+            
+            var directives: CompletionEntry[] = ["ng-for", "ng-repeat", "ng-if", "ng-switch"].map( name => ({
+                name,
+                kind: ScriptElementKind.classElement,
+                kindModifiers: "",
+                sortText: "0"
+            }));
+            
+            var token = getTokenAtPosition(sourceFile, position);
+            // getText gets the full string from the `
+            // getStart gets the position of the `
+            // So to get the char before the current position...
+            var templateText = token.getText();
+            var priorPos = templateText.charAt(position - 1 - token.getStart());
+            if(priorPos === '*'){
+                elements = directives;
+            }
+                        
+            var result: CompletionInfo = {
+                isMemberCompletion: false,
+                isNewIdentifierLocation: false,
+                entries: elements
+            }
+            return result;
+        }
+
+        function getTypeScriptCompletionsAtPosition(fileName: string, position: number): CompletionInfo {
             synchronizeHostData();
 
             let completionData = getCompletionData(fileName, position);
