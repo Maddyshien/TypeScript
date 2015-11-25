@@ -78,15 +78,41 @@ namespace ngml {
         }
 
 		function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
-			let diag: ts.Diagnostic = {
-				file: sourceFile,
-				start: 0,
-				length: 5,
-				messageText: "html",
-				category: ts.DiagnosticCategory.Warning,
-				code: 1
+			let result: ts.Diagnostic[] = [];
+
+			// Find each template string in the file
+			ts.forEachChild(sourceFile, visit);
+			function visit(child: ts.Node){
+				if(child.kind === ts.SyntaxKind.FirstTemplateToken){
+					// Ensure it is a Angular template string
+					if(getNgTemplateClassDecl(child)){
+						let text = child.getText();
+						text = text.substring(1, text.length - 1);
+						addTemplateErrors(text, child.getStart() + 1);
+					}
+				} else {
+					ts.forEachChild(child, visit);
+				}
 			}
-			return [diag];
+
+			function addTemplateErrors(text: string, offset: number){
+				let parser = new NgTemplateParser(text);
+				parser.errors.forEach( err => {
+					let parts = err.split(':');
+					// TODO: Change the errors in the parser to match expected Diagnostic fields
+					let diag: ts.Diagnostic = {
+						file: sourceFile,
+						start: parseInt(parts[1]) + offset,
+						length: parseInt(parts[2]) - parseInt(parts[1]),
+						messageText: parts[3].trim(),
+						category: ts.DiagnosticCategory.Warning,
+						code: 1
+					}
+					result.push(diag);
+				});
+			}
+
+			return result;
 		}
 
         return {

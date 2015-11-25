@@ -11,6 +11,14 @@
 ////	name: string;
 ////}
 
-//verify.errorExistsBetweenMarkers("1", "2");
-verify.getSyntacticDiagnostics("html");
-debug.printErrorList();
+verify.numberOfErrorsInCurrentFile(1);
+verify.errorExistsBetweenMarkers("1", "2");
+verify.getSyntacticDiagnostics(`[
+  {
+    "message": "Unmatched opening tag",
+    "start": 54,
+    "length": 5,
+    "category": "warning",
+    "code": 1
+  }
+]`);
