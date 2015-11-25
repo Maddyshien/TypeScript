@@ -77,9 +77,22 @@ namespace ngml {
             return result;
         }
 
+		function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
+			let diag: ts.Diagnostic = {
+				file: sourceFile,
+				start: 0,
+				length: 5,
+				messageText: "html",
+				category: ts.DiagnosticCategory.Warning,
+				code: 1
+			}
+			return [diag];
+		}
+
         return {
             version: "0.1.0",
-            getCompletionsAtPosition: getNgTemplateCompletionsAtPosition
+            getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
+			getSyntacticDiagnostics: getNgSyntacticDiagnostics
         };
     });
 
@@ -670,7 +683,7 @@ namespace ngml {
 			return result;
 		}
 	}
-	
+
 	export function testParser(){
 		let assert = (condition: boolean, msg?: string) => {
 			if(!condition) {
@@ -757,7 +770,7 @@ namespace ngml {
 		assert(nodeAtPos.parent.kind === ngNodeKind.SelfClosingTag);
 		assert((nodeAtPos.parent as NgTag).name === "div");
 
-		/* TODO: Generate a function that maps to the 
+		/* TODO: Generate a function that maps to the
 		*/
 	}
 }
