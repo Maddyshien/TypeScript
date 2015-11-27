@@ -1,126 +1,128 @@
 /// <reference path='services.ts'/>
 
 namespace ngml {
-    ts.pluginFactories.push( program => {
-
-        function getValidSourceFile(fileName: string): ts.SourceFile {
-            fileName = ts.normalizeSlashes(fileName);
-            let getCanonicalFileName = ts.createGetCanonicalFileName(/* useCaseSensitivefileNames */ false);
-            let sourceFile = program.getSourceFile(getCanonicalFileName(fileName));
-            if (!sourceFile) {
-                throw new Error("Could not find file: '" + fileName + "'.");
-            }
-            return sourceFile;
-        }
-
-        function getNgTemplateCompletionsAtPosition(fileName: string, position: number): ts.CompletionInfo {
-            // TODO: getCompletionEntryDetails needs to be wired up also
-            let typeChecker = program.getTypeChecker();
-            let sourceFile = getValidSourceFile(fileName);
-            let isJavaScriptFile = ts.isJavaScript(fileName);
-            let currentToken = ts.getTokenAtPosition(sourceFile, position);
-
-            // Only execute if in a template string
-            // TODO: Probably needs to handle multi-part tokens (e.g. contains expressions)
-            if(currentToken.kind !== ts.SyntaxKind.FirstTemplateToken){
-                return undefined;
-            }
-
-            // Ensure this template string is set up as per an Angular template
-            let classDecl = getNgTemplateClassDecl(currentToken);
-            if(!classDecl) {
-                return undefined;
-            }
-
-            let classSymbol = typeChecker.getTypeAtLocation(classDecl) as ts.InterfaceType;
-            let classProps = classSymbol.thisType.getProperties();
-
-            var members: ts.CompletionEntry[] = classProps.map(prop => ({
-                name: prop.getName(),
-                kind: ts.ScriptElementKind.memberVariableElement,
-                kindModifiers: "",
-                sortText: "0"
-            }));
-
-            var token = ts.getTokenAtPosition(sourceFile, position);
-            // getText gets the full string from the `
-            // getStart gets the position of the `
-            var templateText = token.getText();
-            var priorPos = templateText.charAt(position - 1 - token.getStart());
-
-            var elements: ts.CompletionEntry[];
-
-            switch(priorPos){
-                case '<':
-                    elements = getElementCompletions();
-                    break
-                case '*':
-                    elements = getDirectiveCompletions();
-                    break;
-                case '[':
-                    elements = getPropertyCompletions();
-                    break;
-                case '(':
-                    elements = getEventCompletions();
-                    break;
-                case "'":
-                default:
-                    elements = members;
-                    break;
-            }
-
-            var result: ts.CompletionInfo = {
-                isMemberCompletion: false,
-                isNewIdentifierLocation: false,
-                entries: elements
-            }
-            return result;
-        }
-
-		function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
-			let result: ts.Diagnostic[] = [];
-
-			// Find each template string in the file
-			ts.forEachChild(sourceFile, visit);
-			function visit(child: ts.Node){
-				if(child.kind === ts.SyntaxKind.FirstTemplateToken){
-					// Ensure it is a Angular template string
-					if(getNgTemplateClassDecl(child)){
-						let text = child.getText();
-						text = text.substring(1, text.length - 1);
-						addTemplateErrors(text, child.getStart() + 1);
-					}
-				} else {
-					ts.forEachChild(child, visit);
+	if(typeof ts !== 'undefined' && ts.pluginFactories){
+		ts.pluginFactories.push( program => {
+	
+			function getValidSourceFile(fileName: string): ts.SourceFile {
+				fileName = ts.normalizeSlashes(fileName);
+				let getCanonicalFileName = ts.createGetCanonicalFileName(/* useCaseSensitivefileNames */ false);
+				let sourceFile = program.getSourceFile(getCanonicalFileName(fileName));
+				if (!sourceFile) {
+					throw new Error("Could not find file: '" + fileName + "'.");
 				}
+				return sourceFile;
 			}
-
-			function addTemplateErrors(text: string, offset: number){
-				let parser = new NgTemplateParser(text);
-				parser.errors.forEach( err => {
-					let parts = err.split(':');
-					// TODO: Change the errors in the parser to match expected Diagnostic fields
-					let diag: ts.Diagnostic = {
-						file: sourceFile,
-						start: parseInt(parts[1]) + offset,
-						length: parseInt(parts[2]) - parseInt(parts[1]),
-						messageText: parts[3].trim(),
-						category: ts.DiagnosticCategory.Warning,
-						code: 1
+	
+			function getNgTemplateCompletionsAtPosition(fileName: string, position: number): ts.CompletionInfo {
+				// TODO: getCompletionEntryDetails needs to be wired up also
+				let typeChecker = program.getTypeChecker();
+				let sourceFile = getValidSourceFile(fileName);
+				let isJavaScriptFile = ts.isJavaScript(fileName);
+				let currentToken = ts.getTokenAtPosition(sourceFile, position);
+	
+				// Only execute if in a template string
+				// TODO: Probably needs to handle multi-part tokens (e.g. contains expressions)
+				if(currentToken.kind !== ts.SyntaxKind.FirstTemplateToken){
+					return undefined;
+				}
+	
+				// Ensure this template string is set up as per an Angular template
+				let classDecl = getNgTemplateClassDecl(currentToken);
+				if(!classDecl) {
+					return undefined;
+				}
+	
+				let classSymbol = typeChecker.getTypeAtLocation(classDecl) as ts.InterfaceType;
+				let classProps = classSymbol.thisType.getProperties();
+	
+				var members: ts.CompletionEntry[] = classProps.map(prop => ({
+					name: prop.getName(),
+					kind: ts.ScriptElementKind.memberVariableElement,
+					kindModifiers: "",
+					sortText: "0"
+				}));
+	
+				var token = ts.getTokenAtPosition(sourceFile, position);
+				// getText gets the full string from the `
+				// getStart gets the position of the `
+				var templateText = token.getText();
+				var priorPos = templateText.charAt(position - 1 - token.getStart());
+	
+				var elements: ts.CompletionEntry[];
+	
+				switch(priorPos){
+					case '<':
+						elements = getElementCompletions();
+						break
+					case '*':
+						elements = getDirectiveCompletions();
+						break;
+					case '[':
+						elements = getPropertyCompletions();
+						break;
+					case '(':
+						elements = getEventCompletions();
+						break;
+					case "'":
+					default:
+						elements = members;
+						break;
+				}
+	
+				var result: ts.CompletionInfo = {
+					isMemberCompletion: false,
+					isNewIdentifierLocation: false,
+					entries: elements
+				}
+				return result;
+			}
+	
+			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
+				let result: ts.Diagnostic[] = [];
+	
+				// Find each template string in the file
+				ts.forEachChild(sourceFile, visit);
+				function visit(child: ts.Node){
+					if(child.kind === ts.SyntaxKind.FirstTemplateToken){
+						// Ensure it is a Angular template string
+						if(getNgTemplateClassDecl(child)){
+							let text = child.getText();
+							text = text.substring(1, text.length - 1);
+							addTemplateErrors(text, child.getStart() + 1);
+						}
+					} else {
+						ts.forEachChild(child, visit);
 					}
-					result.push(diag);
-				});
+				}
+	
+				function addTemplateErrors(text: string, offset: number){
+					let parser = new NgTemplateParser(text);
+					parser.errors.forEach( err => {
+						let parts = err.split(':');
+						// TODO: Change the errors in the parser to match expected Diagnostic fields
+						let diag: ts.Diagnostic = {
+							file: sourceFile,
+							start: parseInt(parts[1]) + offset,
+							length: parseInt(parts[2]) - parseInt(parts[1]),
+							messageText: parts[3].trim(),
+							category: ts.DiagnosticCategory.Warning,
+							code: 1
+						}
+						result.push(diag);
+					});
+				}
+	
+				return result;
 			}
-
-			return result;
-		}
-
-        return {
-            version: "0.1.0",
-            getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
-			getSyntacticDiagnostics: getNgSyntacticDiagnostics
-        };
-    });
+	
+			return {
+				version: "0.1.0",
+				getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
+				getSyntacticDiagnostics: getNgSyntacticDiagnostics
+			};
+		});
+	}
 
     function getNgTemplateClassDecl(currentToken: ts.Node){
         // Verify we are in a 'template' property assignment, in an object literal, which is an call arg, in a decorator
@@ -324,8 +326,11 @@ namespace ngml {
 							// Close tag for current top of stack. Pop from stack, add as final child, and continue
 							stack.pop();
 						} else {
-							this.errors.push(`html:${nextChild.startPos}:${this.currentPos}: Expected closing tag named "${
-								stack[stack.length - 1].name}"`);
+							let msg = (stack.length > 1) ? 
+									`Expected closing tag named "${stack[stack.length - 1].name}"` :
+									`Unexpected closing tag`;
+
+							this.errors.push(`html:${nextChild.startPos}:${this.currentPos}: ${msg}`);
 						}
 						break;
 					default:
@@ -796,7 +801,19 @@ namespace ngml {
 		assert(nodeAtPos.parent.kind === ngNodeKind.SelfClosingTag);
 		assert((nodeAtPos.parent as NgTag).name === "div");
 
-		/* TODO: Generate a function that maps to the
+		/* TODO: 
+		- Generate a function that maps to the code in the Angular template
+		  - Map errors from this function back into the template string.
+		- Handle interpolations inside attribute values, e.g. <div name='{{name}}'>
+		
+		Generated functions
+		===================
+		 - There is no global scope available. All expressions are instance members. To model this, bind
+		any identifiers to an instance of the class (e.g. "let __instance__ = new Component()").
+		 - Other names in scope are pipes, but these (I believe) are always preceded by "|".
+		 - Have a local "__pipes__" which is the pipes available, and re-write these to "__pipes__."
+		 - Need to add into scope any variables adding via the "#id" syntax.
+		 - Need to extract any code 
 		*/
 	}
 }
