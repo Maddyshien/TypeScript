@@ -5,6 +5,7 @@ namespace ts {
         version: string;
         getCompletionsAtPosition?(fileName: string, position: number): CompletionInfo;
         getSyntacticDiagnostics?(sourceFile: SourceFile): Diagnostic[];
+        getSemanticDiagnostics?(sourceFile: SourceFile): Diagnostic[];
     }
 
     interface PluginFactory {

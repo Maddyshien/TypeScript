@@ -2815,6 +2815,13 @@ namespace ts {
             // Therefore only get diagnostics for given file.
 
             let semanticDiagnostics = program.getSemanticDiagnostics(targetSourceFile, cancellationToken);
+
+            plugins.forEach( plugin => {
+                if(plugin.getSemanticDiagnostics) {
+                    semanticDiagnostics = semanticDiagnostics.concat(plugin.getSemanticDiagnostics(targetSourceFile));
+                }
+            });
+
             if (!program.getCompilerOptions().declaration) {
                 return semanticDiagnostics;
             }

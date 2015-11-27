@@ -116,10 +116,23 @@ namespace ngml {
 				return result;
 			}
 
+			function getNgSemanticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
+				let anError = {
+					file: sourceFile,
+					start: 10,
+					length: 10,
+					messageText: "Testing...",
+					category: ts.DiagnosticCategory.Warning,
+					code: 1
+				};
+				return [anError];
+			}
+
 			return {
 				version: "0.1.0",
 				getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
-				getSyntacticDiagnostics: getNgSyntacticDiagnostics
+				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
+				getSemanticDiagnostics: getNgSemanticDiagnostics
 			};
 		});
 	}
