@@ -3,7 +3,7 @@
 namespace ngml {
 	if(typeof ts !== 'undefined' && ts.pluginFactories){
 		ts.pluginFactories.push( program => {
-	
+
 			function getValidSourceFile(fileName: string): ts.SourceFile {
 				fileName = ts.normalizeSlashes(fileName);
 				let getCanonicalFileName = ts.createGetCanonicalFileName(/* useCaseSensitivefileNames */ false);
@@ -13,44 +13,44 @@ namespace ngml {
 				}
 				return sourceFile;
 			}
-	
+
 			function getNgTemplateCompletionsAtPosition(fileName: string, position: number): ts.CompletionInfo {
 				// TODO: getCompletionEntryDetails needs to be wired up also
 				let typeChecker = program.getTypeChecker();
 				let sourceFile = getValidSourceFile(fileName);
 				let isJavaScriptFile = ts.isJavaScript(fileName);
 				let currentToken = ts.getTokenAtPosition(sourceFile, position);
-	
+
 				// Only execute if in a template string
 				// TODO: Probably needs to handle multi-part tokens (e.g. contains expressions)
 				if(currentToken.kind !== ts.SyntaxKind.FirstTemplateToken){
 					return undefined;
 				}
-	
+
 				// Ensure this template string is set up as per an Angular template
 				let classDecl = getNgTemplateClassDecl(currentToken);
 				if(!classDecl) {
 					return undefined;
 				}
-	
+
 				let classSymbol = typeChecker.getTypeAtLocation(classDecl) as ts.InterfaceType;
 				let classProps = classSymbol.thisType.getProperties();
-	
+
 				var members: ts.CompletionEntry[] = classProps.map(prop => ({
 					name: prop.getName(),
 					kind: ts.ScriptElementKind.memberVariableElement,
 					kindModifiers: "",
 					sortText: "0"
 				}));
-	
+
 				var token = ts.getTokenAtPosition(sourceFile, position);
 				// getText gets the full string from the `
 				// getStart gets the position of the `
 				var templateText = token.getText();
 				var priorPos = templateText.charAt(position - 1 - token.getStart());
-	
+
 				var elements: ts.CompletionEntry[];
-	
+
 				switch(priorPos){
 					case '<':
 						elements = getElementCompletions();
@@ -69,7 +69,7 @@ namespace ngml {
 						elements = members;
 						break;
 				}
-	
+
 				var result: ts.CompletionInfo = {
 					isMemberCompletion: false,
 					isNewIdentifierLocation: false,
@@ -77,10 +77,10 @@ namespace ngml {
 				}
 				return result;
 			}
-	
+
 			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
 				let result: ts.Diagnostic[] = [];
-	
+
 				// Find each template string in the file
 				ts.forEachChild(sourceFile, visit);
 				function visit(child: ts.Node){
@@ -95,7 +95,7 @@ namespace ngml {
 						ts.forEachChild(child, visit);
 					}
 				}
-	
+
 				function addTemplateErrors(text: string, offset: number){
 					let parser = new NgTemplateParser(text);
 					parser.errors.forEach( err => {
@@ -112,10 +112,10 @@ namespace ngml {
 						result.push(diag);
 					});
 				}
-	
+
 				return result;
 			}
-	
+
 			return {
 				version: "0.1.0",
 				getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
@@ -219,6 +219,7 @@ namespace ngml {
 		startPos: number;
 		endPos: number; // Position after final char. Text length = endPos - startPos
 		parent: NgTag;
+		getText?: () => string;
 	}
 
 	export interface NgNamedNode extends NgNode {
@@ -258,6 +259,10 @@ namespace ngml {
 			this.currentPos = 0;
 			this.errors = [];
 			this.ast = this.scan();
+		}
+
+		getNodeText(node: NgNode){
+			return this.text.substring(node.startPos, node.endPos);
 		}
 
 		private getChar(offset: number = 0){
@@ -326,7 +331,7 @@ namespace ngml {
 							// Close tag for current top of stack. Pop from stack, add as final child, and continue
 							stack.pop();
 						} else {
-							let msg = (stack.length > 1) ? 
+							let msg = (stack.length > 1) ?
 									`Expected closing tag named "${stack[stack.length - 1].name}"` :
 									`Unexpected closing tag`;
 
@@ -574,7 +579,8 @@ namespace ngml {
 				fullStartPos: fullStartPos,
 				startPos: this.currentPos - 1,
 				endPos: 0,
-				parent: null
+				parent: null,
+				getText: () => this.getNodeText(result)
 			}
 			this.stats.interpolations++;
 
@@ -715,6 +721,136 @@ namespace ngml {
 		}
 	}
 
+	function generateFunction(ast: NgNode, componentType: string): string {
+		type nameTable = string[]; // Maps name to type
+		var availableGlobals: nameTable = []; // None, I believe.
+		var nameScopes: nameTable[] = [availableGlobals];
+		let body = "";
+
+		if(ast){
+			let indent = '  ';
+			body = processNode(ast as NgTag);
+			function processNode(node: NgTag): string {
+				let map: {[index: string]: string} = {};
+				let locals: {[index: string]: string} = {};
+				let blocks: string[] = [];
+				let statements: string[] = [];
+				let names: nameTable = [];
+				nameScopes.push(names);
+				node.children.forEach( child => {
+					if(child.kind == ngNodeKind.StartTag || child.kind == ngNodeKind.SelfClosingTag){
+						// Declare a local of each tag type needed.
+						let tagNode = child as NgTag;
+						map[tagNode.name] = `let __${tagNode.name} = new HTMLElement();\n`;
+
+						// Add any local names introduced
+						tagNode.attributes.forEach( attrib => {
+							if(attrib.name[0] == '#' && !attrib.value){
+								let attribName = fixupName(attrib.name.substring(1));
+								locals[attribName] = `let ${attribName} = __${tagNode.name};\n`
+								names.push(attribName);
+							}
+						});
+
+						// Declare a statement block for each element also.
+						let block = indent + '{\n';
+						let oldIndent = indent;
+						indent += '  ';
+						// Skip empty blocks
+						let blockText = processNode(tagNode);
+						block += blockText;
+						indent = oldIndent;
+						block += indent + '}\n';
+						if(blockText.trim()) {
+							blocks.push(block);
+						}
+					} else if(child.kind == ngNodeKind.Interpolation){
+						let expr = child.getText();
+						expr = expr.substring(2, expr.length - 2); // Trim the {{-}}
+						expr = indent + `(${bindNames(expr)});\n`;
+						statements.push(expr);
+					}
+				});
+				node.attributes.forEach( attrib => {
+					if((attrib.name[0] == '[' || attrib.name[0] == '(') && attrib.value){
+						// Data or event binding
+						let isEvent = attrib.name[0] == '(';
+						let name = attrib.name.substring(1, attrib.name.length - 1);
+						name = fixupName(name, isEvent);
+						let value = bindNames(attrib.value);
+						let tagName = attrib.parent.name;
+						if(isEvent){
+							statements.push(indent + `__${tagName}.${name} = $event => ${value};\n`);
+						} else {
+							statements.push(indent + `__${tagName}.${name} = ${value};\n`);
+						}
+					} else {
+						// TODO: Handle interpolation inside attributes here, or add a specific child node?
+					}
+				});
+				nameScopes.pop();
+
+				let result = "";
+				for(let key in map){
+					result += indent + map[key];
+				}
+				for(let key in locals){
+					result += indent + locals[key];
+				}
+				statements.forEach(line => result += line);
+				blocks.forEach(block => result += block);
+				return result;
+			}
+
+			function fixupName(name: string, isEvent: boolean = false) : string {
+				let result = "";
+				if(name == 'innerHtml') return 'innerHTML'; // Special case
+
+				// De-snake
+				let i = 0;
+				let upperNext = false;
+				while(i < name.length){
+					if(name[i] == '-'){
+						upperNext = true;
+					} else {
+						result += (upperNext ? name[i].toUpperCase() : name[i]);
+						upperNext = false;
+					}
+					i++;
+				}
+				if(isEvent){
+					result = 'on' + result;
+				}
+				return result;
+			}
+
+			function bindNames(expr: string): string {
+				// TODO: Need to break this apart to find each identifier. Just handles a raw name to first separator for now.
+				let name = expr;
+				[' ', '.', '('].forEach(char => {
+					let trimAt = name.indexOf(char);
+					if(trimAt !== -1){
+						name = name.substring(0, trimAt);
+					}
+				});
+
+				for(let i = nameScopes.length - 1; i > 0; i--){
+					let scope = nameScopes[i];
+					if(scope.indexOf(name) !== -1){
+						// It's declared in an outscope scope. Use it directly
+						return expr;
+					}
+				}
+				// Bind it to the component instance
+				return expr.replace(name, "__comp." + name);
+			}
+		}
+
+		return `(function(__comp: ${componentType}){
+${body}})(null);`;
+	}
+
+
 	export function testParser(){
 		let assert = (condition: boolean, msg?: string) => {
 			if(!condition) {
@@ -801,19 +937,167 @@ namespace ngml {
 		assert(nodeAtPos.parent.kind === ngNodeKind.SelfClosingTag);
 		assert((nodeAtPos.parent as NgTag).name === "div");
 
-		/* TODO: 
-		- Generate a function that maps to the code in the Angular template
-		  - Map errors from this function back into the template string.
-		- Handle interpolations inside attribute values, e.g. <div name='{{name}}'>
-		
-		Generated functions
-		===================
-		 - There is no global scope available. All expressions are instance members. To model this, bind
-		any identifiers to an instance of the class (e.g. "let __instance__ = new Component()").
+		// GenerateFunction tests
+		let result = generateFunction(null, 'MyComp');
+		let expected = `(function(__comp: MyComp){
+})(null);`;
+		assert(result == expected);
+
+
+		tmp = new NgTemplateParser("<div></div>");
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+})(null);`;
+		assert(result == expected);
+
+
+		tmp = new NgTemplateParser("<div><p>Hello</p></div>");
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+  {
+    let __p = new HTMLElement();
+  }
+})(null);`;
+		assert(result == expected);
+
+		tmp = new NgTemplateParser("<div>{{greeting}}</div>");
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+  {
+    (__comp.greeting);
+  }
+})(null);`;
+		assert(result == expected);
+
+		tmp = new NgTemplateParser("<div [data]='myProp'>Test</div>");
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+  {
+    __div.data = __comp.myProp;
+  }
+})(null);`;
+		assert(result == expected);
+
+		tmp = new NgTemplateParser("<div (click)='handleClick()'>Test</div>");
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+  {
+    __div.onclick = $event => __comp.handleClick();
+  }
+})(null);`;
+		assert(result == expected);
+
+		tmp = new NgTemplateParser("<div (click-handler)='handleClick($event)' [text-content]='data'>Test</div>");
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+  {
+    __div.onclickHandler = $event => __comp.handleClick($event);
+    __div.textContent = __comp.data;
+  }
+})(null);`;
+		assert(result == expected);
+
+		tmp = new NgTemplateParser(`
+<player #my-player/>
+<button (click)='myPlayer.play()'>Play</button>`);
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __player = new HTMLElement();
+  let __button = new HTMLElement();
+  let myPlayer = __player;
+  {
+    __button.onclick = $event => myPlayer.play();
+  }
+})(null);`;
+		assert(result == expected);
+
+
+		tmp = new NgTemplateParser(`<div [style]='divStyle'>
+  <h1 #myHeader>{{greeting}}</h1>
+  <p (hover)='hide(myHeader)' [text-content]='myHeader.value'></p>
+</div>`);
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLElement();
+  {
+    let __h1 = new HTMLElement();
+    let __p = new HTMLElement();
+    let myHeader = __h1;
+    __div.style = __comp.divStyle;
+    {
+      (__comp.greeting);
+    }
+    {
+      __p.onhover = $event => __comp.hide(myHeader);
+      __p.textContent = myHeader.value;
+    }
+  }
+})(null);`;
+		assert(result == expected);
+
+		/*
+		TODO
+		 - Create the right element type for the tag name.
+		 - Include custom elements/directives in above list.
+		 - Get the event and property names from above types.
+		 - Break apart and bind the template expressions more accurately.
+		 - Implement mapping to map the generated code to the template.
+		 - Micro-syntax and bindings for directives, e.g.: *ng-for="#hero of heroes", #i=index"
+		 - Better understanding of template syntax, such as pipes and elvis'.
+
+		Template syntax notes
+		=====================
+		 - There is no global scope available. All expressions are instance members.
+		 - To model this, bind any non-local identifiers to an instance of the class.
 		 - Other names in scope are pipes, but these (I believe) are always preceded by "|".
-		 - Have a local "__pipes__" which is the pipes available, and re-write these to "__pipes__."
-		 - Need to add into scope any variables adding via the "#id" syntax.
-		 - Need to extract any code 
+		 - Standard attributes are HTML attributes, not the DOM properties as specified by typings and bound by Angular.
+		 - Do we want to provide intellisense for standard attributes? Where would these be specified?
+		 - Need to disallow 'this' keyword (should work if just not recognized and prefixed with "this.", i.e. "this.this")
+		 - For simple examples, see the test cases.
+
+		Name scoping notes
+		==================
+		Every sibling element needs to be in the same block, to see each others #name.
+		Any "#item in items" directive needs 'item' to not be visible to siblings, but visible to its own expressions.
+		e.g. <div *ng-for="#hero of heroes", #i=index">{{i+1}} - {{hero.fullName}}</div>
+		Data and event names also need to bind to these introduced locals
+		e.g. <little-hero *ng-for="#hero of heroes" [hero]="hero"></little-hero>
+		So every sibling element generates a sibling element to represent itself in the current block...
+		... and a block for all its additional names, attributes, and children.
+
+		Here is the psuedo-code
+		=======================
+		Generate the surrounding IIFE. Now insert inside it...
+		For each node with children or attributes, starting at __root__
+		##ProcessNode
+		 - Pre-pass: Push a new nameTable on nameScopes.
+		     For each direct child tag, add "let __<tag> = new HTML<tagName>Element();" to a unique dictionary.
+		     For each with a #<name>, also emit "let <name> = __<tag>;" to a dictionary, and add <name> to nameTable.
+		     Emit statements from __<tag> dictionary, then <name> dictionary (this avoids duplicates).
+		 - For each direct tag child again:
+		     Generate a new statment block and push a new nameTable.
+		     Pre-pass: Go over the directive attributes and find each that may introduce a new name, e.g. *ng-for='#item in items'
+		       For "#<name> in <id>" types, call 'bindExpr' on <id>, and emit = "let <name> = <boundExpr>;".
+		       Add <name> to nameTable.
+		     For every non-directive attribute:
+		       Call 'bindExpr' on <value> to rebind expressions, and 'fixName' on <name> to fixup names (snake-case to mixed-case).
+		         Note: Snake-case special cases, e.g. innerHTML -> inner-html).
+		         Note: This handles regular attributes differently, and only extracts/binds interpolations and embeds in "(...);".
+		         Note: Needs to embed interpol expressions in "(..);" as they may be object literals, and will be expression statements.
+		       If it's a data binding, emit as: __<tag>.<fixedname> = <boundExpr>;
+		       If it's an event, emit as: __<tag>.<fixedname> = ($event) => <boundExpr>;
+		       If it's a regular attrib, emit: <boundExpr>
+		       TODO: Two-way syntax, i.e. [(foo)] = 'expr'
+		     Call ##ProcessNode on the child
+		     Pop the nameTable.
+		 - For every child interpolation node:
+		     Call 'bindExpr' on the expressions, emit as: <boundExpr>
 		*/
 	}
 }
