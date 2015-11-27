@@ -77,24 +77,36 @@ namespace ngml {
 				}
 				return result;
 			}
-
-			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
-				let result: ts.Diagnostic[] = [];
+			
+			type ngTemplateNode = {templateString: ts.Node, classDecl: ts.Node};
+			function getNgTemplateStringsInSourceFile(sourceFile: ts.SourceFile) : ngTemplateNode[] {
+				let result: ngTemplateNode[] = [];
 
 				// Find each template string in the file
 				ts.forEachChild(sourceFile, visit);
 				function visit(child: ts.Node){
 					if(child.kind === ts.SyntaxKind.FirstTemplateToken){
 						// Ensure it is a Angular template string
-						if(getNgTemplateClassDecl(child)){
-							let text = child.getText();
-							text = text.substring(1, text.length - 1);
-							addTemplateErrors(text, child.getStart() + 1);
+						let classDecl = getNgTemplateClassDecl(child); 
+						if(classDecl){
+							result.push({templateString: child, classDecl});
 						}
 					} else {
 						ts.forEachChild(child, visit);
 					}
 				}
+				
+				return result;
+			}
+
+			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
+				let result: ts.Diagnostic[] = [];
+				
+				getNgTemplateStringsInSourceFile(sourceFile).forEach( elem => {
+					let text = elem.templateString.getText();
+					text = text.substring(1, text.length - 1);
+					addTemplateErrors(text, elem.templateString.getStart() + 1);
+				});
 
 				function addTemplateErrors(text: string, offset: number){
 					let parser = new NgTemplateParser(text);
@@ -117,15 +129,14 @@ namespace ngml {
 			}
 
 			function getNgSemanticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
-				let anError = {
-					file: sourceFile,
-					start: 10,
-					length: 10,
-					messageText: "Testing...",
-					category: ts.DiagnosticCategory.Warning,
-					code: 1
-				};
-				return [anError];
+				let result: ts.Diagnostic[] = [];
+				
+				getNgTemplateStringsInSourceFile(sourceFile).forEach( elem => getSemanticErrors(elem));
+				
+				function getSemanticErrors(ngTemplate: ngTemplateNode){
+					// 
+				}
+				return result;
 			}
 
 			return {
