@@ -77,7 +77,7 @@ namespace ngml {
 				}
 				return result;
 			}
-			
+
 			type ngTemplateNode = {templateString: ts.Node, classDecl: ts.Node};
 			function getNgTemplateStringsInSourceFile(sourceFile: ts.SourceFile) : ngTemplateNode[] {
 				let result: ngTemplateNode[] = [];
@@ -87,7 +87,7 @@ namespace ngml {
 				function visit(child: ts.Node){
 					if(child.kind === ts.SyntaxKind.FirstTemplateToken){
 						// Ensure it is a Angular template string
-						let classDecl = getNgTemplateClassDecl(child); 
+						let classDecl = getNgTemplateClassDecl(child);
 						if(classDecl){
 							result.push({templateString: child, classDecl});
 						}
@@ -95,13 +95,13 @@ namespace ngml {
 						ts.forEachChild(child, visit);
 					}
 				}
-				
+
 				return result;
 			}
 
 			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
 				let result: ts.Diagnostic[] = [];
-				
+
 				getNgTemplateStringsInSourceFile(sourceFile).forEach( elem => {
 					let text = elem.templateString.getText();
 					text = text.substring(1, text.length - 1);
@@ -130,11 +130,37 @@ namespace ngml {
 
 			function getNgSemanticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
 				let result: ts.Diagnostic[] = [];
-				
+
 				getNgTemplateStringsInSourceFile(sourceFile).forEach( elem => getSemanticErrors(elem));
-				
+
 				function getSemanticErrors(ngTemplate: ngTemplateNode){
-					// 
+					// Get the AST for the HTML
+					let text = ngTemplate.templateString.getText();
+					text = text.substring(1, text.length - 1);
+					let htmlParser = new NgTemplateParser(text);
+
+					// Get the name of the class and generate the stub function
+					let className = ngTemplate.classDecl.symbol.name;
+					let generatedFunc = generateFunction(htmlParser.ast, className);
+
+					// Generate a source file with the injected content and get errors on it
+					let insertionPoint = ngTemplate.classDecl.end;
+					let oldText = sourceFile.getText();
+					let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
+					let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
+					ts.bindSourceFile(newSourceFile);
+					// TODO: Ensure this file isn't captured anywhere. If it is, we need to clean it up.
+					let newErrs = program.getSemanticDiagnostics(newSourceFile);
+
+					// Locate the errors specific to the generated code and add to results
+					let endNewText = insertionPoint + generatedFunc.length + 2;
+					newErrs.forEach( err => {
+						if(err.start > insertionPoint && err.start < endNewText){
+							err.start = ngTemplate.templateString.pos + 2;
+							err.length = text.length;
+							result.push(err);
+						}
+					});
 				}
 				return result;
 			}
