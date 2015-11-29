@@ -791,12 +791,15 @@ namespace ngml {
 					if(child.kind == ngNodeKind.StartTag || child.kind == ngNodeKind.SelfClosingTag){
 						// Declare a local of each tag type needed.
 						let tagNode = child as NgTag;
-						map[tagNode.name] = `let __${tagNode.name} = new HTMLElement();\n`;
+						let tagType = tagToType[tagNode.name];
+						if(!tagType) tagType = "HTMLElement";
+						map[tagNode.name] = `let __${tagNode.name} = new ${tagType}();\n`;
 
 						// Add any local names introduced
 						tagNode.attributes.forEach( attrib => {
 							if(attrib.name[0] == '#' && !attrib.value){
 								let attribName = fixupName(attrib.name.substring(1));
+								// TODO: This removes/hides duplicate identifier errors if a local is used twice
 								locals[attribName] = `let ${attribName} = __${tagNode.name};\n`
 								names.push(attribName);
 							}
@@ -817,7 +820,7 @@ namespace ngml {
 					} else if(child.kind == ngNodeKind.Interpolation){
 						let expr = child.getText();
 						expr = expr.substring(2, expr.length - 2); // Trim the {{-}}
-						expr = indent + `(${bindNames(expr)});\n`;
+						expr = indent + `(${bindNames(expr, child.startPos + 2, child.endPos - 2)});\n`;
 						statements.push(expr);
 					}
 				});
@@ -827,12 +830,13 @@ namespace ngml {
 						let isEvent = attrib.name[0] == '(';
 						let name = attrib.name.substring(1, attrib.name.length - 1);
 						name = fixupName(name, isEvent);
-						let value = bindNames(attrib.value);
+						let value = bindNames(attrib.value, attrib.valuePos, attrib.valuePos + attrib.value.length);
 						let tagName = attrib.parent.name;
+						let markedName = `/*{start:${attrib.startPos + 1}}*/${name}/*{end:${attrib.startPos + attrib.name.length - 1}}*/`;
 						if(isEvent){
-							statements.push(indent + `__${tagName}.${name} = $event => ${value};\n`);
+							statements.push(indent + `__${tagName}.${markedName} = $event => ${value};\n`);
 						} else {
-							statements.push(indent + `__${tagName}.${name} = ${value};\n`);
+							statements.push(indent + `__${tagName}.${markedName} = ${value};\n`);
 						}
 					} else {
 						// TODO: Handle interpolation inside attributes here, or add a specific child node?
@@ -874,7 +878,7 @@ namespace ngml {
 				return result;
 			}
 
-			function bindNames(expr: string): string {
+			function bindNames(expr: string, start: number, end: number): string {
 				// TODO: Need to break this apart to find each identifier. Just handles a raw name to first separator for now.
 				let name = expr;
 				[' ', '.', '('].forEach(char => {
@@ -888,11 +892,11 @@ namespace ngml {
 					let scope = nameScopes[i];
 					if(scope.indexOf(name) !== -1){
 						// It's declared in an outscope scope. Use it directly
-						return expr;
+						return `/*{start:${start}}*/${expr}/*{end:${end}}*/`;
 					}
 				}
 				// Bind it to the component instance
-				return expr.replace(name, "__comp." + name);
+				return expr.replace(name, "__comp." + `/*{start:${start}}*/${name}`) + `/*{end:${end}}*/`;
 			}
 		}
 
@@ -900,6 +904,169 @@ namespace ngml {
 ${body}})(null);`;
 	}
 
+	// TODO: Should create one of these per component/parser, as each may add custom tags
+	let tagToType: {[index: string]: string} = {
+		// Copied from the createElement overloads in lib.d.ts
+		"a": "HTMLAnchorElement",
+		"abbr": "HTMLPhraseElement",
+		"acronym": "HTMLPhraseElement",
+		"address": "HTMLBlockElement",
+		"applet": "HTMLAppletElement",
+		"area": "HTMLAreaElement",
+		"audio": "HTMLAudioElement",
+		"b": "HTMLPhraseElement",
+		"base": "HTMLBaseElement",
+		"basefont": "HTMLBaseFontElement",
+		"bdo": "HTMLPhraseElement",
+		"big": "HTMLPhraseElement",
+		"blockquote": "HTMLBlockElement",
+		"body": "HTMLBodyElement",
+		"br": "HTMLBRElement",
+		"button": "HTMLButtonElement",
+		"canvas": "HTMLCanvasElement",
+		"caption": "HTMLTableCaptionElement",
+		"center": "HTMLBlockElement",
+		"cite": "HTMLPhraseElement",
+		"code": "HTMLPhraseElement",
+		"col": "HTMLTableColElement",
+		"colgroup": "HTMLTableColElement",
+		"datalist": "HTMLDataListElement",
+		"dd": "HTMLDDElement",
+		"del": "HTMLModElement",
+		"dfn": "HTMLPhraseElement",
+		"dir": "HTMLDirectoryElement",
+		"div": "HTMLDivElement",
+		"dl": "HTMLDListElement",
+		"dt": "HTMLDTElement",
+		"em": "HTMLPhraseElement",
+		"embed": "HTMLEmbedElement",
+		"fieldset": "HTMLFieldSetElement",
+		"font": "HTMLFontElement",
+		"form": "HTMLFormElement",
+		"frame": "HTMLFrameElement",
+		"frameset": "HTMLFrameSetElement",
+		"h1": "HTMLHeadingElement",
+		"h2": "HTMLHeadingElement",
+		"h3": "HTMLHeadingElement",
+		"h4": "HTMLHeadingElement",
+		"h5": "HTMLHeadingElement",
+		"h6": "HTMLHeadingElement",
+		"head": "HTMLHeadElement",
+		"hr": "HTMLHRElement",
+		"html": "HTMLHtmlElement",
+		"i": "HTMLPhraseElement",
+		"iframe": "HTMLIFrameElement",
+		"img": "HTMLImageElement",
+		"input": "HTMLInputElement",
+		"ins": "HTMLModElement",
+		"isindex": "HTMLIsIndexElement",
+		"kbd": "HTMLPhraseElement",
+		"keygen": "HTMLBlockElement",
+		"label": "HTMLLabelElement",
+		"legend": "HTMLLegendElement",
+		"li": "HTMLLIElement",
+		"link": "HTMLLinkElement",
+		"listing": "HTMLBlockElement",
+		"map": "HTMLMapElement",
+		"marquee": "HTMLMarqueeElement",
+		"menu": "HTMLMenuElement",
+		"meta": "HTMLMetaElement",
+		"nextid": "HTMLNextIdElement",
+		"nobr": "HTMLPhraseElement",
+		"object": "HTMLObjectElement",
+		"ol": "HTMLOListElement",
+		"optgroup": "HTMLOptGroupElement",
+		"option": "HTMLOptionElement",
+		"p": "HTMLParagraphElement",
+		"param": "HTMLParamElement",
+		"plaintext": "HTMLBlockElement",
+		"pre": "HTMLPreElement",
+		"progress": "HTMLProgressElement",
+		"q": "HTMLQuoteElement",
+		"rt": "HTMLPhraseElement",
+		"ruby": "HTMLPhraseElement",
+		"s": "HTMLPhraseElement",
+		"samp": "HTMLPhraseElement",
+		"script": "HTMLScriptElement",
+		"select": "HTMLSelectElement",
+		"small": "HTMLPhraseElement",
+		"source": "HTMLSourceElement",
+		"span": "HTMLSpanElement",
+		"strike": "HTMLPhraseElement",
+		"strong": "HTMLPhraseElement",
+		"style": "HTMLStyleElement",
+		"sub": "HTMLPhraseElement",
+		"sup": "HTMLPhraseElement",
+		"table": "HTMLTableElement",
+		"tbody": "HTMLTableSectionElement",
+		"td": "HTMLTableDataCellElement",
+		"textarea": "HTMLTextAreaElement",
+		"tfoot": "HTMLTableSectionElement",
+		"th": "HTMLTableHeaderCellElement",
+		"thead": "HTMLTableSectionElement",
+		"title": "HTMLTitleElement",
+		"tr": "HTMLTableRowElement",
+		"track": "HTMLTrackElement",
+		"tt": "HTMLPhraseElement",
+		"u": "HTMLPhraseElement",
+		"ul": "HTMLUListElement",
+		"var": "HTMLPhraseElement",
+		"video": "HTMLVideoElement",
+		"x-ms-webview": "MSHTMLWebViewElement",
+		"xmp": "HTMLBlockElement"
+	};
+
+	function stripMarkers(input: string){
+		return input.replace(/\/\*\{(start|end):\d+}\*\//g, "");
+	}
+
+	// This function is given the generated code with the markers, and a position from the template to try
+	// and location within it. It searches the markers to see if the position from the template maps to a
+	// location in the generated code.
+	function mapPosViaMarkers(input: string, pos: number): number{
+		let mappedPos = -1;
+
+		// We want to find the start/end markers separately to easily get lastIndexOf as the first position after the start marker
+		let startMarker = /\/\*\{start:(\d+)}\*\//g;
+		let endMarker = /\/\*\{end:(\d+)}\*\//g;
+
+		let startResult: RegExpExecArray = null;
+		let endResult: RegExpExecArray = null;
+		while(startResult = startMarker.exec(input)){
+			// Always advance in pairs
+			endResult = endMarker.exec(input);
+			let startPos = parseInt(startResult[1]);
+			let endPos = parseInt(endResult[1]);
+			if(pos >= startPos && pos <= endPos){
+				// Found a range that matches.
+				mappedPos = startMarker.lastIndex + (pos - startPos);
+				break;
+			}
+		}
+
+		return mappedPos;
+	}
+
+	// This function is used for mapping an error in the generated code, to a range in the template code.
+	// It basically takes the range of the error, and finds the first range in the template with some overlap.
+	function findFirstOverlap(input: string, startPos: number, endPos: number){
+		// Loop though the input finding range marker pairs.
+		let markerPairRegex = /\/\*\{start:(\d+)}\*\/.+?\/\*\{end:(\d+)}\*\//g;
+		let markerPairResult: RegExpExecArray = null;
+
+		while(markerPairResult = markerPairRegex.exec(input)){
+			// When found, see if the span of that range intersects with the range given.
+			let endMatch = markerPairRegex.lastIndex;
+			let startMatch = endMatch - markerPairResult[0].length;
+			if(endMatch >= startPos && startMatch <= endPos){
+				// If so, return the range as specified by the markers.
+				let startRange = parseInt(markerPairResult[1]);
+				let endRange = parseInt(markerPairResult[2]);
+				return {startRange, endRange};
+			}
+		}
+		return null;
+	}
 
 	export function testParser(){
 		let assert = (condition: boolean, msg?: string) => {
@@ -997,7 +1164,7 @@ ${body}})(null);`;
 		tmp = new NgTemplateParser("<div></div>");
 		result = generateFunction(tmp.ast, 'MyComp');
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
 })(null);`;
 		assert(result == expected);
 
@@ -1005,9 +1172,9 @@ ${body}})(null);`;
 		tmp = new NgTemplateParser("<div><p>Hello</p></div>");
 		result = generateFunction(tmp.ast, 'MyComp');
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
   {
-    let __p = new HTMLElement();
+    let __p = new HTMLParagraphElement();
   }
 })(null);`;
 		assert(result == expected);
@@ -1015,9 +1182,9 @@ ${body}})(null);`;
 		tmp = new NgTemplateParser("<div>{{greeting}}</div>");
 		result = generateFunction(tmp.ast, 'MyComp');
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
   {
-    (__comp.greeting);
+    (__comp./*{start:7}*/greeting/*{end:15}*/);
   }
 })(null);`;
 		assert(result == expected);
@@ -1025,17 +1192,18 @@ ${body}})(null);`;
 		tmp = new NgTemplateParser("<div [data]='myProp'>Test</div>");
 		result = generateFunction(tmp.ast, 'MyComp');
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
   {
-    __div.data = __comp.myProp;
+    __div./*{start:6}*/data/*{end:10}*/ = __comp./*{start:13}*/myProp/*{end:19}*/;
   }
 })(null);`;
 		assert(result == expected);
 
 		tmp = new NgTemplateParser("<div (click)='handleClick()'>Test</div>");
 		result = generateFunction(tmp.ast, 'MyComp');
+		result = stripMarkers(result);
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
   {
     __div.onclick = $event => __comp.handleClick();
   }
@@ -1045,10 +1213,10 @@ ${body}})(null);`;
 		tmp = new NgTemplateParser("<div (click-handler)='handleClick($event)' [text-content]='data'>Test</div>");
 		result = generateFunction(tmp.ast, 'MyComp');
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
   {
-    __div.onclickHandler = $event => __comp.handleClick($event);
-    __div.textContent = __comp.data;
+    __div./*{start:6}*/onclickHandler/*{end:19}*/ = $event => __comp./*{start:22}*/handleClick($event)/*{end:41}*/;
+    __div./*{start:44}*/textContent/*{end:56}*/ = __comp./*{start:59}*/data/*{end:63}*/;
   }
 })(null);`;
 		assert(result == expected);
@@ -1057,9 +1225,10 @@ ${body}})(null);`;
 <player #my-player/>
 <button (click)='myPlayer.play()'>Play</button>`);
 		result = generateFunction(tmp.ast, 'MyComp');
+		result = stripMarkers(result);
 		expected = `(function(__comp: MyComp){
   let __player = new HTMLElement();
-  let __button = new HTMLElement();
+  let __button = new HTMLButtonElement();
   let myPlayer = __player;
   {
     __button.onclick = $event => myPlayer.play();
@@ -1073,11 +1242,12 @@ ${body}})(null);`;
   <p (hover)='hide(myHeader)' [text-content]='myHeader.value'></p>
 </div>`);
 		result = generateFunction(tmp.ast, 'MyComp');
+		result = stripMarkers(result);
 		expected = `(function(__comp: MyComp){
-  let __div = new HTMLElement();
+  let __div = new HTMLDivElement();
   {
-    let __h1 = new HTMLElement();
-    let __p = new HTMLElement();
+    let __h1 = new HTMLHeadingElement();
+    let __p = new HTMLParagraphElement();
     let myHeader = __h1;
     __div.style = __comp.divStyle;
     {
@@ -1090,6 +1260,40 @@ ${body}})(null);`;
   }
 })(null);`;
 		assert(result == expected);
+
+
+		let ngml = "<div [style.]='items.' (click)='foo(10, '>{{foo.}}</div>";
+		tmp = new NgTemplateParser(ngml);
+		result = generateFunction(tmp.ast, 'MyComp');
+		expected = `(function(__comp: MyComp){
+  let __div = new HTMLDivElement();
+  {
+    (__comp./*{start:44}*/foo./*{end:48}*/);
+    __div./*{start:6}*/style./*{end:12}*/ = __comp./*{start:15}*/items./*{end:21}*/;
+    __div./*{start:24}*/onclick/*{end:29}*/ = $event => __comp./*{start:32}*/foo(10, /*{end:40}*/;
+  }
+})(null);`;
+		assert(result == expected);
+		nodeAtPos = tmp.getNodeAtPosition(48);
+		assert(nodeAtPos.kind === ngNodeKind.Interpolation);
+
+		nodeAtPos = tmp.getNodeAtPosition(32);
+		assert(nodeAtPos.kind === ngNodeKind.Attribute);
+		assert((nodeAtPos as NgAttrib).name === '(click)');
+
+		let mappedPos = mapPosViaMarkers(result, 5);
+		assert(mappedPos === -1);
+
+		// Check cursor in input at [s|tyle] maps to generated at __div.s|tyle
+		mappedPos = mapPosViaMarkers(result, 7);
+		assert(mappedPos === 136);
+
+		// Check an error range in the generated text maps to the template
+		let interpStart = result.indexOf("(__comp.") + 1;
+		let errRange = findFirstOverlap(result, interpStart, interpStart + 37);
+		let interpExprStart = ngml.indexOf("{{foo.}}") + 2;
+		assert(errRange.startRange === interpExprStart);
+		assert(errRange.endRange === errRange.startRange + 4);
 
 		/*
 		TODO
