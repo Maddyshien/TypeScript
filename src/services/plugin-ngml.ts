@@ -156,8 +156,21 @@ namespace ngml {
 					let endNewText = insertionPoint + generatedFunc.length + 2;
 					newErrs.forEach( err => {
 						if(err.start > insertionPoint && err.start < endNewText){
-							err.start = ngTemplate.templateString.pos + 2;
-							err.length = text.length;
+							let templateStart = ngTemplate.templateString.pos + 2;
+							// Map the error position to an offset in the generated function
+							let errorPos = err.start - (insertionPoint + 1);
+							let mappedPos = findFirstOverlap(generatedFunc, errorPos, errorPos + err.length);
+							if(mappedPos){
+								// If it mapped, map it to the template location in the file
+								err.start = mappedPos.startRange;
+								err.length = mappedPos.endRange - mappedPos.startRange;
+								err.start += ngTemplate.templateString.pos + 2;
+							} else {
+								// Else span the whole template
+								err.start = ngTemplate.templateString.pos + 2;
+								err.length = text.length;
+							}
+
 							result.push(err);
 						}
 					});

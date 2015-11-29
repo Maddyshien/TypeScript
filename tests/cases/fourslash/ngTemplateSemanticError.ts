@@ -3,21 +3,22 @@
 // @experimentalDecorators: true
 
 ////declare var Component: any;
-////declare class HTMLElement {};
+////declare class HTMLDivElement {};
 ////
 ////@Component({
-////	template: `<div>Greetings, {{nombre}}</div>`
+////	template: `<div>Greetings, {{/*1*/nombre/*2*/}}</div>`
 ////})
 ////class Foo{
 ////	name: string;
 ////}
 
 verify.numberOfErrorsInCurrentFile(1);
+verify.errorExistsBetweenMarkers("1", "2");
 verify.getSemanticDiagnostics(`[
   {
     "message": "Property 'nombre' does not exist on type 'Foo'.",
-    "start": 84,
-    "length": 32,
+    "start": 105,
+    "length": 6,
     "category": "error",
     "code": 2339
   }
