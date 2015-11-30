@@ -15,10 +15,15 @@ namespace ngml {
 			}
 
 			function getNgTemplateCompletionsAtPosition(fileName: string, position: number): ts.CompletionInfo {
-				// TODO: getCompletionEntryDetails needs to be wired up also
+				// This function should:
+				// - Check it is in a template string
+				// - If so, see if it is in a start tag name, attribute name, expression, or close tag.
+				// - For an open tag, return the list of tags available (+ next expected close tag)
+				// - For a close tag, return the next expected close tag
+				// - For an attribute name, return the list of properties for the tag type
+				// - For an expression, return the completions for the mapped expression location in the generated code
 				let typeChecker = program.getTypeChecker();
 				let sourceFile = getValidSourceFile(fileName);
-				let isJavaScriptFile = ts.isJavaScript(fileName);
 				let currentToken = ts.getTokenAtPosition(sourceFile, position);
 
 				// Only execute if in a template string
@@ -33,43 +38,81 @@ namespace ngml {
 					return undefined;
 				}
 
-				let classSymbol = typeChecker.getTypeAtLocation(classDecl) as ts.InterfaceType;
-				let classProps = classSymbol.thisType.getProperties();
+				// Parse the template string into an AST and see what position we're in
+				let text = currentToken.getText();
+				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
+				let htmlParser = new NgTemplateParser(text);
+				let posInTemplate = position - (currentToken.getStart() + 1)
+				let currNode = htmlParser.getNodeAtPosition(posInTemplate);
 
-				var members: ts.CompletionEntry[] = classProps.map(prop => ({
-					name: prop.getName(),
-					kind: ts.ScriptElementKind.memberVariableElement,
-					kindModifiers: "",
-					sortText: "0"
-				}));
+				let elements: ts.CompletionEntry[];
 
-				var token = ts.getTokenAtPosition(sourceFile, position);
-				// getText gets the full string from the `
-				// getStart gets the position of the `
-				var templateText = token.getText();
-				var priorPos = templateText.charAt(position - 1 - token.getStart());
-
-				var elements: ts.CompletionEntry[];
-
-				switch(priorPos){
-					case '<':
+				switch(currNode.kind){
+					case ngNodeKind.StartTag:
+					case ngNodeKind.SelfClosingTag:
 						elements = getElementCompletions();
-						break
-					case '*':
-						elements = getDirectiveCompletions();
 						break;
-					case '[':
-						elements = getPropertyCompletions();
+					case ngNodeKind.EndTag:
+						elements = [{
+							name: currNode.parent.name,
+							kind: ts.ScriptElementKind.classElement,
+							kindModifiers: "",
+							sortText: "0"
+						}];
 						break;
-					case '(':
-						// TODO: Stop this for now, as it's interfering with signature help.
-						// Need to only show this list when in the attribute name position, not in expressions.
-						//elements = getEventCompletions();
-						return undefined;
+					case ngNodeKind.Attribute:
+						if(posInTemplate >= (currNode as NgAttrib).valuePos){
+							elements = getClassMembers(typeChecker, classDecl);
+						} else if((currNode as NgAttrib).name[0] === '*'){
+							elements = getDirectiveCompletions();
+						} else {
+							// Get the parent tag name, the type for that, and the members of that type
+							let parentTagType = tagToType[currNode.parent.name];
+							if(!parentTagType){
+								elements = getDummyCompletions();
+								break;
+							}
+							// HTMLDivElement etc. are declared as variables
+							// TODO: Handle custom elements, which will be classes
+							try {
+								let inScopeSymbols = typeChecker.getSymbolsInScope(currentToken, ts.SymbolFlags.Interface);
+								if(!inScopeSymbols || inScopeSymbols.length == 0){
+									elements = getDummyCompletions();
+									break;
+								}
+								if(!inScopeSymbols.some( sym => {
+									if(sym.name === parentTagType){
+										let membersNames = Object.keys(sym.members);
+										elements = membersNames.map(name => ({
+											name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
+											kind: ts.ScriptElementKind.memberVariableElement,
+											kindModifiers: "",
+											sortText: "0"
+										}));
+
+										// TODO: The below is all magic to me, some of it surely wrong
+										let baseTypes = typeChecker.getBaseTypes(sym.valueDeclaration as any);
+										baseTypes.forEach(objType => {
+											let baseMembers = Object.keys(objType.symbol.members).map(name => ({
+												name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
+												kind: ts.ScriptElementKind.memberVariableElement,
+												kindModifiers: "",
+												sortText: "0"
+											}));
+											elements = elements.concat(baseMembers);
+										});
+										return true;
+									}
+								})){
+									elements = getDummyCompletions();
+								}
+							} catch (err){
+								elements = getDummyCompletions();
+							}
+						}
 						break;
-					case "'":
-					default:
-						elements = members;
+					case ngNodeKind.Interpolation:
+						elements = getClassMembers(typeChecker, classDecl);
 						break;
 				}
 
@@ -282,7 +325,7 @@ namespace ngml {
 
     // TODO: The below are to return a collection of mock completions for now...
     function getElementCompletions(): ts.CompletionEntry[]{
-        return ["div", "span", "p", "h1", "h2", "img"].map( name => ({
+		return Object.keys(tagToType).map( name => ({
                 name,
                 kind: ts.ScriptElementKind.classElement,
                 kindModifiers: "",
@@ -291,7 +334,7 @@ namespace ngml {
     }
 
     function getDirectiveCompletions(): ts.CompletionEntry[]{
-        return ["ng-for", "ng-repeat", "ng-if", "ng-switch"].map( name => ({
+        return ["ng-for", "ng-if", "ng-switch"].map( name => ({
                 name,
                 kind: ts.ScriptElementKind.keyword,
                 kindModifiers: "",
@@ -299,23 +342,27 @@ namespace ngml {
         }));
     }
 
-    function getPropertyCompletions(): ts.CompletionEntry[] {
-        return ["text", "class", "style"].map( name => ({
+	function getDummyCompletions(): ts.CompletionEntry[]{
+        return ["sausage", "bacon", "eggs"].map( name => ({
                 name,
-                kind: ts.ScriptElementKind.memberVariableElement,
+                kind: ts.ScriptElementKind.label,
                 kindModifiers: "",
                 sortText: "0"
         }));
     }
 
-    function getEventCompletions(): ts.CompletionEntry[] {
-        return ["click", "change", "mouseover"].map( name => ({
-                name,
-                kind: ts.ScriptElementKind.memberFunctionElement,
-                kindModifiers: "",
-                sortText: "0"
-        }));
-    }
+	function getClassMembers(typeChecker: ts.TypeChecker, classDecl: ts.Node): ts.CompletionEntry[]{
+		let classSymbol = typeChecker.getTypeAtLocation(classDecl) as ts.InterfaceType;
+		let classProps = classSymbol.thisType.getProperties();
+
+		var members: ts.CompletionEntry[] = classProps.map(prop => ({
+			name: prop.getName(),
+			kind: ts.ScriptElementKind.memberVariableElement,
+			kindModifiers: "",
+			sortText: "0"
+		}));
+		return members;
+	}
 
 	// A rudimentary parser for Angular templates
 	// It expects the HTML to be well formed, i.e. self closing or matched tags, not unmatched like <br>.
@@ -620,6 +667,7 @@ namespace ngml {
 			this.skipWhitespace();
 			// No value given
 			if(this.peekChar() !== '='){
+				result.endPos = this.currentPos;
 				return result;
 			} else {
 			this.getChar();
@@ -833,7 +881,7 @@ namespace ngml {
 		getAttribAtPosition(node: NgTag, pos: number): NgAttrib{
 			let result: NgAttrib = null;
 			node.attributes.forEach( attrib => {
-				if(pos >= attrib.startPos && pos < attrib.endPos) {
+				if(pos >= attrib.startPos && pos <= attrib.endPos) {
 					result = attrib;
 				}
 			});
