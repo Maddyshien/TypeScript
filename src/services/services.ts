@@ -3111,6 +3111,17 @@ namespace ts {
             let previousToken = findPrecedingToken(position, sourceFile);
             log("getCompletionData: Get previous token 1: " + (new Date().getTime() - start));
 
+            // TODO: This is a temporary workaround while working on the Angular template plugin.
+            // That needs to trigger on a bunch of chars we normally wouldn't complete on, so just exit on those.
+            if(previousToken && previousToken.end === position && ( // Supress on < ( [ * '
+                previousToken.kind === SyntaxKind.LessThanToken ||
+                previousToken.kind === SyntaxKind.OpenParenToken ||
+                previousToken.kind === SyntaxKind.OpenBracketToken ||
+                previousToken.kind === SyntaxKind.AsteriskToken ||
+                previousToken.kind === SyntaxKind.StringLiteral)){
+                return undefined;
+            }
+
             // The decision to provide completion depends on the contextToken, which is determined through the previousToken.
             // Note: 'previousToken' (and thus 'contextToken') can be undefined if we are the beginning of the file
             let contextToken = previousToken;

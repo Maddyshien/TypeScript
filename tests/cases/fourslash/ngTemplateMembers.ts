@@ -5,8 +5,13 @@
 ////})
 ////class Foo{
 ////	name: string;
-////    getName(){ return this.name;}
+////    getName(){ return [/*c1*/'bill'].join(/*c2*/);}
 ////}
+
+goTo.marker('c1');
+verify.completionListIsEmpty();
+goTo.marker('c2');
+verify.completionListIsEmpty();
 
 goTo.marker('prop');
 verify.memberListContains('text');
