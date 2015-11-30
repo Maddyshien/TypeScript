@@ -4,6 +4,7 @@ namespace ts {
     export interface Plugin {
         version: string;
         getCompletionsAtPosition?(fileName: string, position: number): CompletionInfo;
+        getSignatureHelpItems?(fileName: string, position: number): SignatureHelpItems;
         getSyntacticDiagnostics?(sourceFile: SourceFile): Diagnostic[];
         getSemanticDiagnostics?(sourceFile: SourceFile): Diagnostic[];
     }

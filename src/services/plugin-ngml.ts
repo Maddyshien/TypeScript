@@ -78,6 +78,33 @@ namespace ngml {
 				return result;
 			}
 
+			function getNgSignatureHelpItems(fileName: string, position: number): ts.SignatureHelpItems{
+				let displayPart = {text: "test", kind: "test"};
+				let helpParam: ts.SignatureHelpParameter = {
+					name: "foo" ,
+					documentation: [displayPart],
+					displayParts: [displayPart],
+					isOptional: false
+				};
+				let item: ts.SignatureHelpItem = {
+					isVariadic: false,
+					prefixDisplayParts: [displayPart],
+					suffixDisplayParts: [displayPart],
+					separatorDisplayParts: [displayPart],
+					parameters: [helpParam],
+					documentation: [displayPart]
+				};
+				let result: ts.SignatureHelpItems = {
+					items: [item],
+					applicableSpan: {start: 0, length: 10},
+					selectedItemIndex: 1,
+					argumentIndex: 0,
+					argumentCount: 0
+				};
+
+				return result;
+			}
+
 			type ngTemplateNode = {templateString: ts.Node, classDecl: ts.Node};
 			function getNgTemplateStringsInSourceFile(sourceFile: ts.SourceFile) : ngTemplateNode[] {
 				let result: ngTemplateNode[] = [];
@@ -181,6 +208,7 @@ namespace ngml {
 			return {
 				version: "0.1.0",
 				getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
+				getSignatureHelpItems: getNgSignatureHelpItems,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
 				getSemanticDiagnostics: getNgSemanticDiagnostics
 			};

@@ -6432,7 +6432,22 @@ namespace ts {
 
             let sourceFile = getValidSourceFile(fileName);
 
-            return SignatureHelp.getSignatureHelpItems(program, sourceFile, position, cancellationToken);
+            let results = SignatureHelp.getSignatureHelpItems(program, sourceFile, position, cancellationToken);
+
+            // Use the first set of results returned
+            if(!results){
+                plugins.some( plugin => {
+                    if(plugin.getSignatureHelpItems) {
+                        results = plugin.getSignatureHelpItems(fileName, position);
+                        if(results){
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+            }
+
+            return results;
         }
 
         /// Syntactic features
