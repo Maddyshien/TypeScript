@@ -10,7 +10,7 @@ namespace ts {
     }
 
     interface PluginFactory {
-        (program: Program): Plugin;
+        (program: Program, cancellationToken: CancellationToken): Plugin;
     }
 
     export var pluginFactories: PluginFactory[] = [];

@@ -2680,7 +2680,7 @@ namespace ts {
             hostCache = undefined;
 
             program = newProgram;
-            plugins = pluginFactories.map( factory => factory(program));
+            plugins = pluginFactories.map( factory => factory(program, cancellationToken));
 
             // Make sure all the nodes in the program are both bound, and have their parent
             // pointers set property.

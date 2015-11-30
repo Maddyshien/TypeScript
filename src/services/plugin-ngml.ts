@@ -2,7 +2,7 @@
 
 namespace ngml {
 	if(typeof ts !== 'undefined' && ts.pluginFactories){
-		ts.pluginFactories.push( program => {
+		ts.pluginFactories.push( (program, cancellationToken) => {
 
 			function getValidSourceFile(fileName: string): ts.SourceFile {
 				fileName = ts.normalizeSlashes(fileName);
@@ -62,7 +62,10 @@ namespace ngml {
 						elements = getPropertyCompletions();
 						break;
 					case '(':
-						elements = getEventCompletions();
+						// TODO: Stop this for now, as it's interfering with signature help.
+						// Need to only show this list when in the attribute name position, not in expressions.
+						//elements = getEventCompletions();
+						return undefined;
 						break;
 					case "'":
 					default:
@@ -79,30 +82,56 @@ namespace ngml {
 			}
 
 			function getNgSignatureHelpItems(fileName: string, position: number): ts.SignatureHelpItems{
-				let displayPart = {text: "test", kind: "test"};
-				let helpParam: ts.SignatureHelpParameter = {
-					name: "foo" ,
-					documentation: [displayPart],
-					displayParts: [displayPart],
-					isOptional: false
-				};
-				let item: ts.SignatureHelpItem = {
-					isVariadic: false,
-					prefixDisplayParts: [displayPart],
-					suffixDisplayParts: [displayPart],
-					separatorDisplayParts: [displayPart],
-					parameters: [helpParam],
-					documentation: [displayPart]
-				};
-				let result: ts.SignatureHelpItems = {
-					items: [item],
-					applicableSpan: {start: 0, length: 10},
-					selectedItemIndex: 1,
-					argumentIndex: 0,
-					argumentCount: 0
-				};
+				let sourceFile = getValidSourceFile(fileName);
 
-				return result;
+				// TODO: There's a lot of cut & paste with getSemanticErrors here. Refactor this out into common code.
+				let ngTemplate: ngTemplateNode = null;
+
+				// Find the first (if any) template string for this position
+				getNgTemplateStringsInSourceFile(sourceFile).some( elem => {
+					if(elem.templateString.getStart() < position && elem.templateString.getEnd() > position){
+						ngTemplate = elem;
+						return true;
+					}
+					return false;
+				});
+
+				// If not in a template string, bail out
+				if(!ngTemplate){
+					return undefined;
+				}
+
+				// Generate a source file with the generated template code, and map to the position in that
+				let text = ngTemplate.templateString.getText();
+				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
+				let htmlParser = new NgTemplateParser(text);
+
+				// Get the name of the class and generate the stub function
+				let className = ngTemplate.classDecl.symbol.name;
+				let generatedFunc = generateFunction(htmlParser.ast, className);
+
+				// Generate a source file with the injected content and get errors on it
+				let insertionPoint = ngTemplate.classDecl.getEnd();
+				let oldText = sourceFile.getText();
+				let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
+				let endNewText = insertionPoint + generatedFunc.length + 2;
+				let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
+				ts.bindSourceFile(newSourceFile);
+
+				// Find if there is a range in the generated code that maps the current position in the template
+				// The offset into the template is the current position - the template text start position
+				let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
+
+				// See if this maps to a location in the generated code
+				let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
+				if(mappedPos < 0) {
+					return undefined;
+				} else {
+					mappedPos += insertionPoint + 1;
+				}
+
+				// Get signature help for the location
+				return ts.SignatureHelp.getSignatureHelpItems(program, newSourceFile, mappedPos, cancellationToken);
 			}
 
 			type ngTemplateNode = {templateString: ts.Node, classDecl: ts.Node};
