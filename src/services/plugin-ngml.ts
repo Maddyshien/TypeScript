@@ -109,7 +109,7 @@ namespace ngml {
 									let baseTypes = typeChecker.getBaseTypes(sym.valueDeclaration as any);
 									baseTypes.forEach(objType => {
 										let baseMembers = Object.keys(objType.symbol.members).map(name => ({
-											name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
+											name: name,
 											kind: ts.ScriptElementKind.memberVariableElement,
 											kindModifiers: "",
 											sortText: "0"
@@ -124,6 +124,11 @@ namespace ngml {
 												return true;
 											}
 											return false;
+										});
+									} else {
+										// Snakify
+										elements.forEach( elem => {
+											elem.name = snakify(elem.name);
 										});
 									}
 									return true;
@@ -986,6 +991,21 @@ namespace ngml {
 			});
 			return result;
 		}
+	}
+
+	function snakify(name: string) : string {
+		// Take something like "addEventListener" and convert it to "add-event-listener"
+		if(name === "innerHTML") return "inner-html";
+
+		let result = "";
+		for(let i = 0; i < name.length; i++){
+			if(name[i] === name[i].toUpperCase()){
+				result += "-" + name[i].toLowerCase();
+			} else {
+				result += name[i];
+			}
+		}
+		return result;
 	}
 
 	function generateFunction(ast: NgNode, componentType: string): string {
