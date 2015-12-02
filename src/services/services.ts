@@ -4504,10 +4504,10 @@ namespace ts {
             }
         }
 
-        function getQuickInfoAtPosition(fileName: string, position: number): QuickInfo {
+        function getQuickInfoAtPosition(fileName: string, position: number, sourceFile?: SourceFile): QuickInfo {
             synchronizeHostData();
 
-            let sourceFile = getValidSourceFile(fileName);
+            if(!sourceFile) sourceFile = getValidSourceFile(fileName);
             let node = getTouchingPropertyName(sourceFile, position);
             if (!node) {
                 return undefined;
@@ -4541,7 +4541,17 @@ namespace ts {
                         }
                 }
 
-                return undefined;
+                // Try the plugins
+                // TODO: These should be more general than just if TypeScript can't find something to show
+                let result: QuickInfo = undefined;
+                plugins.some( plugin => {
+                    if(plugin.getQuickInfoAtPosition) {
+                        result = plugin.getQuickInfoAtPosition(fileName, position, getQuickInfoAtPosition);
+                    }
+                    return !!result;
+                });
+
+                return result;
             }
 
             let displayPartsDocumentationsAndKind = getSymbolDisplayPartsDocumentationAndSymbolKind(symbol, sourceFile, getContainerNode(node), node);

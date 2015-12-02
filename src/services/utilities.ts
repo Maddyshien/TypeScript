@@ -5,6 +5,8 @@ namespace ts {
         version: string;
         getCompletionsAtPosition?(fileName: string, position: number): CompletionInfo;
         getSignatureHelpItems?(fileName: string, position: number): SignatureHelpItems;
+        getQuickInfoAtPosition?(fileName: string, position: number,  
+                getQuickInfoAtPosition: (fileName: string, position: number, sourceFile?: SourceFile) => QuickInfo): QuickInfo;
         getSyntacticDiagnostics?(sourceFile: SourceFile): Diagnostic[];
         getSemanticDiagnostics?(sourceFile: SourceFile): Diagnostic[];
     }

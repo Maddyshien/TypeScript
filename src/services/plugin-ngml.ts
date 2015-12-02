@@ -51,6 +51,14 @@ namespace ngml {
 					case ngNodeKind.StartTag:
 					case ngNodeKind.SelfClosingTag:
 						elements = getElementCompletions();
+						if(currNode.parent.name !== '__root__'){
+							elements.unshift({
+							name: '/' + currNode.parent.name,
+							kind: ts.ScriptElementKind.classElement,
+							kindModifiers: "",
+							sortText: "0"
+						});
+						}
 						break;
 					case ngNodeKind.EndTag:
 						elements = [{
@@ -62,7 +70,15 @@ namespace ngml {
 						break;
 					case ngNodeKind.Attribute:
 						if(posInTemplate >= (currNode as NgAttrib).valuePos){
-							elements = getClassMembers(typeChecker, classDecl);
+							// If we're after a '.', delegate to getCompletions for the location in the generated code
+							let attribValue = (currNode as NgAttrib).value;
+							let attribPos = posInTemplate - (currNode as NgAttrib).valuePos;
+							if(isAfterDot(attribValue, attribPos)){
+								// TODO: Get completions from the generated function.
+								elements = getClassMembers(typeChecker, classDecl);
+							} else {
+								elements = getClassMembers(typeChecker, classDecl);
+							}
 						} else if((currNode as NgAttrib).name[0] === '*'){
 							elements = getDirectiveCompletions();
 						} else {
@@ -74,39 +90,45 @@ namespace ngml {
 							}
 							// HTMLDivElement etc. are declared as variables
 							// TODO: Handle custom elements, which will be classes
-							try {
-								let inScopeSymbols = typeChecker.getSymbolsInScope(currentToken, ts.SymbolFlags.Interface);
-								if(!inScopeSymbols || inScopeSymbols.length == 0){
-									elements = getDummyCompletions();
-									break;
-								}
-								if(!inScopeSymbols.some( sym => {
-									if(sym.name === parentTagType){
-										let membersNames = Object.keys(sym.members);
-										elements = membersNames.map(name => ({
+							let inScopeSymbols = typeChecker.getSymbolsInScope(currentToken, ts.SymbolFlags.Interface);
+							if(!inScopeSymbols || inScopeSymbols.length == 0){
+								elements = getDummyCompletions();
+								break;
+							}
+							if(!inScopeSymbols.some( sym => {
+								if(sym.name === parentTagType){
+									let membersNames = Object.keys(sym.members);
+									elements = membersNames.map(name => ({
+										name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
+										kind: ts.ScriptElementKind.memberVariableElement,
+										kindModifiers: "",
+										sortText: "0"
+									}));
+
+									// TODO: The below is all magic to me, some of it surely wrong
+									let baseTypes = typeChecker.getBaseTypes(sym.valueDeclaration as any);
+									baseTypes.forEach(objType => {
+										let baseMembers = Object.keys(objType.symbol.members).map(name => ({
 											name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
 											kind: ts.ScriptElementKind.memberVariableElement,
 											kindModifiers: "",
 											sortText: "0"
 										}));
-
-										// TODO: The below is all magic to me, some of it surely wrong
-										let baseTypes = typeChecker.getBaseTypes(sym.valueDeclaration as any);
-										baseTypes.forEach(objType => {
-											let baseMembers = Object.keys(objType.symbol.members).map(name => ({
-												name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
-												kind: ts.ScriptElementKind.memberVariableElement,
-												kindModifiers: "",
-												sortText: "0"
-											}));
-											elements = elements.concat(baseMembers);
+										elements = elements.concat(baseMembers);
+									});
+									// Filter from event bindings to 'on*' members and remove the on.
+									if((currNode as NgAttrib).name[0] === '('){
+										elements = elements.filter( elem => {
+											if(elem.name.length > 2 && elem.name.substring(0,2) === 'on'){
+												elem.name = elem.name.substring(2);
+												return true;
+											}
+											return false;
 										});
-										return true;
 									}
-								})){
-									elements = getDummyCompletions();
+									return true;
 								}
-							} catch (err){
+							})){
 								elements = getDummyCompletions();
 							}
 						}
@@ -167,14 +189,78 @@ namespace ngml {
 
 				// See if this maps to a location in the generated code
 				let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
-				if(mappedPos < 0) {
+				if(mappedPos.pointInGenCode < 0) {
 					return undefined;
 				} else {
-					mappedPos += insertionPoint + 1;
+					mappedPos.pointInGenCode += insertionPoint + 1;
 				}
 
 				// Get signature help for the location
-				return ts.SignatureHelp.getSignatureHelpItems(program, newSourceFile, mappedPos, cancellationToken);
+				let result = ts.SignatureHelp.getSignatureHelpItems(program, newSourceFile, mappedPos.pointInGenCode, cancellationToken);
+				result.applicableSpan.start = mappedPos.startRangeInTemplate + (ngTemplate.templateString.getStart() + 1);
+				result.applicableSpan.length = mappedPos.endRangeInTemplate - mappedPos.startRangeInTemplate;
+				return result;
+			}
+
+			// getQuickInfoAtPosition(fileName: string, position: number): QuickInfo
+			function getNgQuickInfoAtPosition(fileName: string, position: number,
+			 getQuickInfoAtPosition: (fileName: string, position: number, sourceFile?: ts.SourceFile) => ts.QuickInfo): ts.QuickInfo {
+				let result: ts.QuickInfo;
+
+				// TODO: Copied from above function while experimenting. Refactor...
+				let sourceFile = getValidSourceFile(fileName);
+
+				// TODO: There's a lot of cut & paste with getSemanticErrors here. Refactor this out into common code.
+				let ngTemplate: ngTemplateNode = null;
+
+				// Find the first (if any) template string for this position
+				getNgTemplateStringsInSourceFile(sourceFile).some( elem => {
+					if(elem.templateString.getStart() < position && elem.templateString.getEnd() > position){
+						ngTemplate = elem;
+						return true;
+					}
+					return false;
+				});
+
+				// If not in a template string, bail out
+				if(!ngTemplate){
+					return undefined;
+				}
+
+				// Generate a source file with the generated template code, and map to the position in that
+				let text = ngTemplate.templateString.getText();
+				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
+				let htmlParser = new NgTemplateParser(text);
+
+				// Get the name of the class and generate the stub function
+				let className = ngTemplate.classDecl.symbol.name;
+				let generatedFunc = generateFunction(htmlParser.ast, className);
+
+				// Generate a source file with the injected content and get errors on it
+				let insertionPoint = ngTemplate.classDecl.getEnd();
+				let oldText = sourceFile.getText();
+				let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
+				let endNewText = insertionPoint + generatedFunc.length + 2;
+				let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
+				ts.bindSourceFile(newSourceFile);
+
+				// Find if there is a range in the generated code that maps the current position in the template
+				// The offset into the template is the current position - the template text start position
+				let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
+
+				// See if this maps to a location in the generated code
+				let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
+				if(mappedPos.pointInGenCode < 0) {
+					return undefined;
+				} else {
+					mappedPos.pointInGenCode += insertionPoint + 1;
+				}
+
+				result = getQuickInfoAtPosition(null, mappedPos.pointInGenCode, newSourceFile);
+				result.textSpan.start = mappedPos.startRangeInTemplate + (ngTemplate.templateString.getStart() + 1);
+				result.textSpan.length = mappedPos.endRangeInTemplate - mappedPos.startRangeInTemplate;
+				// TODO: Update span in returned info
+				return result;
 			}
 
 			type ngTemplateNode = {templateString: ts.Node, classDecl: ts.Node};
@@ -281,6 +367,7 @@ namespace ngml {
 				version: "0.1.0",
 				getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
 				getSignatureHelpItems: getNgSignatureHelpItems,
+				getQuickInfoAtPosition: getNgQuickInfoAtPosition,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
 				getSemanticDiagnostics: getNgSemanticDiagnostics
 			};
@@ -350,6 +437,18 @@ namespace ngml {
                 sortText: "0"
         }));
     }
+
+	// Detect if we're in a member completion position, rather than an identifier
+	// TODO: Crude logic.
+	function isAfterDot(expr: string, pos: number): boolean {
+		while(--pos > expr.length){
+			if(expr[pos] === '.') return true;
+			if(!ts.isIdentifierPart(expr.charCodeAt(pos), ts.ScriptTarget.ES2015)) {
+				return false;
+			}
+		}
+		return false;
+	}
 
 	function getClassMembers(typeChecker: ts.TypeChecker, classDecl: ts.Node): ts.CompletionEntry[]{
 		let classSymbol = typeChecker.getTypeAtLocation(classDecl) as ts.InterfaceType;
@@ -1138,11 +1237,27 @@ ${body}})(null);`;
 		return input.replace(/\/\*\{(start|end):\d+}\*\//g, "");
 	}
 
+	interface CodeMapping {
+		pointInTemplate: number;
+		startRangeInTemplate: number;
+		endRangeInTemplate: number;
+		pointInGenCode: number;
+		startRangeInGenCode: number;
+		endRangeInGenCode: number;
+	}
+
 	// This function is given the generated code with the markers, and a position from the template to try
 	// and location within it. It searches the markers to see if the position from the template maps to a
 	// location in the generated code.
-	function mapPosViaMarkers(input: string, pos: number): number{
-		let mappedPos = -1;
+	function mapPosViaMarkers(input: string, pos: number): CodeMapping {
+		let result: CodeMapping = {
+			pointInTemplate: pos,
+			startRangeInTemplate: null,
+			endRangeInTemplate: null,
+			pointInGenCode: null,
+			startRangeInGenCode: null,
+			endRangeInGenCode: null
+		};
 
 		// We want to find the start/end markers separately to easily get lastIndexOf as the first position after the start marker
 		let startMarker = /\/\*\{start:(\d+)}\*\//g;
@@ -1157,12 +1272,16 @@ ${body}})(null);`;
 			let endPos = parseInt(endResult[1]);
 			if(pos >= startPos && pos <= endPos){
 				// Found a range that matches.
-				mappedPos = startMarker.lastIndex + (pos - startPos);
+				result.pointInGenCode = startMarker.lastIndex + (pos - startPos);
+				result.startRangeInTemplate = startPos;
+				result.endRangeInTemplate = endPos;
+				result.startRangeInGenCode = startMarker.lastIndex;
+				result.endRangeInGenCode = endMarker.lastIndex - (endResult[0].length);
 				break;
 			}
 		}
 
-		return mappedPos;
+		return result;
 	}
 
 	// This function is used for mapping an error in the generated code, to a range in the template code.
@@ -1400,11 +1519,11 @@ ${body}})(null);`;
 		assert((nodeAtPos as NgAttrib).name === '(click)');
 
 		let mappedPos = mapPosViaMarkers(result, 5);
-		assert(mappedPos === -1);
+		assert(mappedPos.pointInTemplate === -1);
 
 		// Check cursor in input at [s|tyle] maps to generated at __div.s|tyle
 		mappedPos = mapPosViaMarkers(result, 7);
-		assert(mappedPos === 136);
+		assert(mappedPos.pointInTemplate === 136);
 
 		// Check an error range in the generated text maps to the template
 		let interpStart = result.indexOf("(__comp.") + 1;

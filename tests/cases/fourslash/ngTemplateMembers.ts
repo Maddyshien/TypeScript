@@ -76,7 +76,8 @@
 goTo.marker('open');
 verify.memberListContains('children');
 goTo.marker('halfopen');
-verify.memberListContains('onclick');
+verify.memberListContains('mouseenter');
+verify.not.memberListContains('onclick');
 
 goTo.marker('c1');
 verify.completionListIsEmpty();
@@ -108,6 +109,6 @@ verify.not.memberListContains('children');
 verify.not.memberListContains('div');
 
 goTo.marker('event');
-verify.memberListContains('onclick');
+verify.memberListContains('click');
 verify.not.memberListContains('text');
 verify.not.memberListContains('getName');
