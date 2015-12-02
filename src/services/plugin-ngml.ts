@@ -89,6 +89,7 @@ namespace ngml {
 								break;
 							}
 							// HTMLDivElement etc. are declared as variables
+
 							// TODO: Handle custom elements, which will be classes
 							let inScopeSymbols = typeChecker.getSymbolsInScope(currentToken, ts.SymbolFlags.Interface);
 							if(!inScopeSymbols || inScopeSymbols.length == 0){
@@ -97,25 +98,15 @@ namespace ngml {
 							}
 							if(!inScopeSymbols.some( sym => {
 								if(sym.name === parentTagType){
-									let membersNames = Object.keys(sym.members);
-									elements = membersNames.map(name => ({
-										name: name, // name.substring(0,2) === 'on' ? `(${name.substring(2)})` : `[${name}]`,
-										kind: ts.ScriptElementKind.memberVariableElement,
+									let declType = typeChecker.getDeclaredTypeOfSymbol(sym);
+									let members = declType.getProperties();
+									elements = members.map(member => ({
+										name: member.name,
+										kind: member.flags & ts.SymbolFlags.Method ? ts.ScriptElementKind.memberFunctionElement : ts.ScriptElementKind.memberVariableElement,
 										kindModifiers: "",
 										sortText: "0"
 									}));
 
-									// TODO: The below is all magic to me, some of it surely wrong
-									let baseTypes = typeChecker.getBaseTypes(sym.valueDeclaration as any);
-									baseTypes.forEach(objType => {
-										let baseMembers = Object.keys(objType.symbol.members).map(name => ({
-											name: name,
-											kind: ts.ScriptElementKind.memberVariableElement,
-											kindModifiers: "",
-											sortText: "0"
-										}));
-										elements = elements.concat(baseMembers);
-									});
 									// Filter from event bindings to 'on*' members and remove the on.
 									if((currNode as NgAttrib).name[0] === '('){
 										elements = elements.filter( elem => {
@@ -994,8 +985,14 @@ namespace ngml {
 	}
 
 	function snakify(name: string) : string {
-		// Take something like "addEventListener" and convert it to "add-event-listener"
-		if(name === "innerHTML") return "inner-html";
+		// Convert an underscores to dashes
+		name = name.replace(/_/g, "-");
+		// There are several all upper-case names, just lowercase these.
+		if(name.toUpperCase() === name) return name.toLowerCase();
+
+		name = name.replace(/HTML/g, "Html");
+		name = name.replace(/URI/g, "Uri");
+		name = name.replace(/NS/g, "Ns");
 
 		let result = "";
 		for(let i = 0; i < name.length; i++){
