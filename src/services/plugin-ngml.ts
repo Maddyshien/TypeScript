@@ -14,6 +14,50 @@ namespace ngml {
 				return sourceFile;
 			}
 
+			// Return the global symbols for the template 'context'. This is basically the instance members
+			// on the component, and any introduced locals.
+			function getContextSymbols(sourceFile: ts.SourceFile, position: number) : ts.Symbol[]{
+				// Walk up from the position looking for block scoped variables (those introduced by #names),
+				// excluding the __<name> variables used for tag types. Stop once the generated IIFE is encountered,
+				// which introduces the __comp parameter, and add the instance members from this type also.
+				let result: ts.Symbol[] = [];
+
+				// Walk up the nodes from the position, stopping on nodes with locals, erroring if we get to the file level.
+				let currNode = ts.getTokenAtPosition(sourceFile, position);
+				while(true){
+					if(!currNode || currNode.kind === ts.SyntaxKind.SourceFile){
+						throw new Error("invalid start position for template locals");
+					}
+					if(currNode.locals){
+						for(let symName in currNode.locals){
+							let sym = currNode.locals[symName];
+							if(sym.flags & ts.SymbolFlags.Variable){
+								// Skip over locals used purely for HTML tag elements
+								if(sym.getName().substring(0,2) === '__') {
+									continue;
+								}
+								result.push(sym);
+							}
+						}
+					}
+					// Did we reach the outer IIFE?
+					if(currNode.kind === ts.SyntaxKind.FunctionExpression){
+						let currFunc = currNode as ts.FunctionExpression;
+						// Should have just the one param, __comp
+						if(currFunc.parameters.length == 1 && currFunc.parameters[0].name.getText() === '__comp'){
+							let checker = program.getTypeChecker();
+							let type = checker.getTypeAtLocation(currFunc.parameters[0])
+							let props = type.getProperties();
+							result = result.concat(props);
+							break;
+						}
+					}
+					currNode = currNode.parent;
+				}
+
+				return result;
+			}
+
 			function getNgTemplateCompletionsAtPosition(fileName: string, position: number): ts.CompletionInfo {
 				// This function should:
 				// - Check it is in a template string

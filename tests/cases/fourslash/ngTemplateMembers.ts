@@ -71,7 +71,13 @@
 ////class Foo{
 ////	name: string;
 ////    getName(){ return [/*c1*/'bill'].join(/*c2*/);}
+////    private setName(){}
 ////}
+////var foo1 = new Foo();
+////foo1./*tmp*/
+
+goTo.marker('tmp');
+verify.not.memberListContains('setName');
 
 goTo.marker('open');
 verify.memberListContains('children');
@@ -94,11 +100,11 @@ goTo.marker('close');
 verify.memberListContains('div');
 verify.not.memberListContains('onclick');
 verify.not.memberListContains('h1');
-verify.not.memberListContains('getName');
+verify.not.memberListContains('get-name');
 
 goTo.marker('prop');
 verify.memberListContains('children');
-verify.memberListContains('className');
+verify.memberListContains('class-name');
 verify.not.memberListContains('div');
 verify.not.memberListContains('getName');
 
