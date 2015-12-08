@@ -76,6 +76,11 @@
 ////var foo1 = new Foo();
 ////foo1./*tmp*/
 
+goTo.marker('event');
+verify.memberListContains('click');
+verify.not.memberListContains('text');
+verify.not.memberListContains('getName');
+
 goTo.marker('tmp');
 verify.not.memberListContains('setName');
 
@@ -113,8 +118,3 @@ verify.memberListContains('name');
 verify.memberListContains('getName');
 verify.not.memberListContains('children');
 verify.not.memberListContains('div');
-
-goTo.marker('event');
-verify.memberListContains('click');
-verify.not.memberListContains('text');
-verify.not.memberListContains('getName');

@@ -2681,11 +2681,11 @@ namespace ts {
             hostCache = undefined;
 
             program = newProgram;
-            plugins.forEach( plugin => plugin && plugin.setProgram ? plugin.setProgram(program) : undefined);
 
             // Make sure all the nodes in the program are both bound, and have their parent
             // pointers set property.
             program.getTypeChecker();
+            plugins.forEach( plugin => plugin && plugin.setProgram ? plugin.setProgram(program) : undefined);
             return;
 
             function getOrCreateSourceFile(fileName: string): SourceFile {

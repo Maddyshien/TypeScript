@@ -15,6 +15,8 @@ namespace ngml {
 			let currentProgram: ts.Program = null;
 			creatingLanguageServiceFlag = false;
 
+			let filePositionMappings: ts.Map<(position: number) => number> = {};
+
 			// The host proxy is used to serve up synthesized source files containing generated code for any source file
 			// that contains an Angular template. It expects all the original source files are already attached to the
 			// original program (as the language service that just called into the plugin should have ensured). Rather than
@@ -49,8 +51,10 @@ namespace ngml {
 						// No template strings in the file, just use the original
 						return originalFile;
 					} else {
-						// TODO: Generate the synthesized source file and return that
-						return originalFile;
+						// Generate the synthesized source file and return that
+						let {generatedFile, getMappedPos} = getGeneratedFile(originalFile, templateStrings);
+						filePositionMappings[fileName] = getMappedPos;
+						return generatedFile;
 					}
 				}
 
@@ -140,14 +144,52 @@ namespace ngml {
 				if(!getTemplateAtPosition(templatesInFile, pos)){
 					return undefined;
 				} else {
+					if(filePositionMappings[fileName]){
+						pos = filePositionMappings[fileName](pos);
+					}
 					return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
 				}
 			}
 
-			// TODO
-			function generateCode(originalText: string, templatesInFile: ngTemplateNode[]) : ts.SourceFile {
-				// TODO:
-				return undefined;
+			function getGeneratedFile(originalFile: ts.SourceFile, templatesInFile: ngTemplateNode[]) {
+				// TODO: Just does the first template for now. Update to handle multiple per file
+				if(!templatesInFile || templatesInFile.length === 0) return undefined;
+
+				// Find the first (if any) template string for this position
+				let ngTemplate = templatesInFile[0];
+
+				// Generate a source file with the generated template code, and map to the position in that
+				let text = ngTemplate.templateString.getText();
+				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
+				let htmlParser = new NgTemplateParser(text);
+
+				// Get the name of the class and generate the stub function
+				let className = ngTemplate.classDecl.symbol.name;
+				let generatedFunc = generateFunction(htmlParser.ast, className);
+
+				// Generate a source file with the injected content and get errors on it
+				let insertionPoint = ngTemplate.classDecl.getEnd();
+				let oldText = originalFile.getText();
+				let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
+				let endNewText = insertionPoint + generatedFunc.length + 2;
+				let newSourceFile = ts.createSourceFile(originalFile.fileName, newText, originalFile.languageVersion, true);
+
+				let getMappedPos = (position: number) => {
+					let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
+
+					// See if this maps to a location in the generated code
+					let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
+					if(!mappedPos.pointInGenCode) {
+						if(position >= endNewText){
+							position += generatedFunc.length + 2;
+						}
+						return position;
+					} else {
+						mappedPos.pointInGenCode += insertionPoint + 1;
+						return mappedPos.pointInGenCode;
+					}
+				};
+				return {generatedFile: newSourceFile, getMappedPos};
 			}
 
 			function getValidSourceFile(fileName: string): ts.SourceFile {
@@ -530,7 +572,10 @@ namespace ngml {
 
 			return {
 				version: "0.1.0",
-				setProgram: (program) => currentProgram = program,
+				setProgram: (program) => {
+					currentProgram = program;
+					ngmlLanguageService.getProgram(); // Trigger a recalculation to update mapping funcs
+				},
 				getCompletionsAtPosition: getCompletionsAtPosition,
 				getSignatureHelpItems: getNgSignatureHelpItems,
 				getQuickInfoAtPosition: getNgQuickInfoAtPosition,
