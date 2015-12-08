@@ -4011,6 +4011,19 @@ namespace ts {
         }
 
         function getCompletionEntryDetails(fileName: string, position: number, entryName: string): CompletionEntryDetails {
+            let result = getTSCompletionEntryDetails(fileName, position, entryName);
+            if(!result){
+                plugins.some( plugin => {
+                    if(plugin && plugin.getCompletionEntryDetails) {
+                        result = plugin.getCompletionEntryDetails(fileName, position, entryName);
+                    }
+                    return !!result;
+                });
+            }
+            return result;
+        }
+
+        function getTSCompletionEntryDetails(fileName: string, position: number, entryName: string): CompletionEntryDetails {
             synchronizeHostData();
 
             // Compute all the completion symbols again.

@@ -151,6 +151,21 @@ namespace ngml {
 				}
 			}
 
+			function getCompletionEntryDetails(fileName: string, position: number, entryName: string): ts.CompletionEntryDetails {
+				let sourceFile = getValidSourceFile(fileName);
+
+				// Does it contain an Angular template at the position requested? If not, exit.
+				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+				if(!getTemplateAtPosition(templatesInFile, position)){
+					return undefined;
+				} else {
+					if(filePositionMappings[fileName]){
+						position = filePositionMappings[fileName](position);
+					}
+					return ngmlLanguageService.getCompletionEntryDetails(fileName, position, entryName);
+				}
+			}
+
 			function getGeneratedFile(originalFile: ts.SourceFile, templatesInFile: ngTemplateNode[]) {
 				// TODO: Just does the first template for now. Update to handle multiple per file
 				if(!templatesInFile || templatesInFile.length === 0) return undefined;
@@ -577,6 +592,7 @@ namespace ngml {
 					ngmlLanguageService.getProgram(); // Trigger a recalculation to update mapping funcs
 				},
 				getCompletionsAtPosition: getCompletionsAtPosition,
+				getCompletionEntryDetails: getCompletionEntryDetails,
 				getSignatureHelpItems: getNgSignatureHelpItems,
 				getQuickInfoAtPosition: getNgQuickInfoAtPosition,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
