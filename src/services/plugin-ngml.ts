@@ -2,12 +2,158 @@
 
 namespace ngml {
 	if(typeof ts !== 'undefined' && ts.pluginFactories){
-		ts.pluginFactories.push( (program, cancellationToken) => {
+		// Set to true when creating the extra language service, to avoid it creating a plugin, which creates a language service, etc...
+		let creatingLanguageServiceFlag = false;
+
+		ts.pluginFactories.push( (cancellationToken, host, docRegistry) => {
+			if(creatingLanguageServiceFlag) return undefined;
+
+			// The below are used for answering questions from generated code via a separate program & language service.
+			creatingLanguageServiceFlag = true;
+			let hostProxy = createHostProxy();
+			let ngmlLanguageService = ts.createLanguageService(hostProxy, docRegistry);
+			let currentProgram: ts.Program = null;
+			creatingLanguageServiceFlag = false;
+
+			// The host proxy is used to serve up synthesized source files containing generated code for any source file
+			// that contains an Angular template. It expects all the original source files are already attached to the
+			// original program (as the language service that just called into the plugin should have ensured). Rather than
+			// the default logic of getting the snapshot from the host, checking the document registry, etc., it just
+			// checks if the already created source file contains any template strings. If not, return as is. If it does,
+			// create a new source file from generated code and return that.
+			function createHostProxy() : ts.LanguageServiceHost {
+				// Just delegate most of the functions to the original host.
+				let result: ts.LanguageServiceHost = {
+					getCompilationSettings: () => host.getCompilationSettings(),
+					getScriptFileNames: () => host.getScriptFileNames(),
+					getScriptVersion: (fileName: string) => host.getScriptVersion(fileName),
+					getScriptSnapshot: (fileName: string) => host.getScriptSnapshot(fileName),
+					getCurrentDirectory: () => host.getCurrentDirectory(),
+					getDefaultLibFileName: (options: ts.CompilerOptions) => host.getDefaultLibFileName(options)
+				};
+
+				// Optional properties. Only add if the original host has them.
+				if(host.getNewLine) result.getNewLine = () => host.getNewLine();
+				if(host.getProjectVersion) result.getProjectVersion = () => host.getProjectVersion();
+		        if(host.getLocalizedDiagnosticMessages) result.getLocalizedDiagnosticMessages = () => host.getLocalizedDiagnosticMessages();
+		        if(host.getCancellationToken) result.getCancellationToken = () => host.getCancellationToken();
+		        if(host.useCaseSensitiveFileNames) result.useCaseSensitiveFileNames = () => host.useCaseSensitiveFileNames();
+
+				// The below method is not used by the TypeScript language service, only by the plugin
+				// It short circuits a lot of the default code that uses the host, Document Registry, etc. to provide a SourceFile.
+				result.getScriptSourceFile = (fileName: string) => {
+					// The original language service should already have this up to date.
+					let originalFile = getValidSourceFile(fileName);
+					let templateStrings = getNgTemplateStringsInSourceFile(originalFile);
+					if(!templateStrings.length){
+						// No template strings in the file, just use the original
+						return originalFile;
+					} else {
+						// TODO: Generate the synthesized source file and return that
+						return originalFile;
+					}
+				}
+
+				return result;
+			}
+
+			interface ngTemplateNode {
+				templateString: ts.Node;
+				classDecl: ts.Node;
+			}
+
+			function getNgTemplateStringsInSourceFile(sourceFile: ts.SourceFile) : ngTemplateNode[] {
+				let result: ngTemplateNode[] = [];
+
+				// Find each template string in the file
+				ts.forEachChild(sourceFile, visit);
+				function visit(child: ts.Node){
+					if(child.kind === ts.SyntaxKind.FirstTemplateToken){
+						// Ensure it is a Angular template string
+						let classDecl = getNgTemplateClassDecl(child);
+						if(classDecl){
+							result.push({templateString: child, classDecl});
+						}
+					} else {
+						ts.forEachChild(child, visit);
+					}
+				}
+
+				return result;
+			}
+
+			// Given a template string node, see if it is an Angular template string, and if so return the containing class.
+			function getNgTemplateClassDecl(currentToken: ts.Node){
+				// Verify we are in a 'template' property assignment, in an object literal, which is an call arg, in a decorator
+				let parentNode = currentToken.parent;  // PropertyAssignment
+				if(!parentNode){
+					return undefined;
+				}
+				if(parentNode.kind !== ts.SyntaxKind.PropertyAssignment){
+					return undefined;
+				} else {
+					// TODO: Is this different for a literal, i.e. a quoted property name like "template"?
+					if((parentNode as any).name.text !== 'template'){
+						return undefined;
+					}
+				}
+				parentNode = parentNode.parent; // ObjectLiteralExpression
+				if(!parentNode || parentNode.kind !== ts.SyntaxKind.ObjectLiteralExpression){
+					return undefined;
+				}
+
+				parentNode = parentNode.parent; // CallExpression
+				if(!parentNode || parentNode.kind !== ts.SyntaxKind.CallExpression){
+					return undefined;
+				}
+
+				let decorator = parentNode.parent; // Decorator
+				if(!decorator || decorator.kind !== ts.SyntaxKind.Decorator){
+					return undefined;
+				}
+
+				let classDecl = decorator.parent; // ClassDeclaration
+				if(!classDecl || classDecl.kind !== ts.SyntaxKind.ClassDeclaration){
+					return undefined;
+				}
+				return classDecl;
+			}
+
+			// Given an array of templates from a file, location the one containing the given position
+			function getTemplateAtPosition(templates: ngTemplateNode[], position: number) : ngTemplateNode {
+				let ngTemplate: ngTemplateNode = null;
+				templates.some( elem => {
+					if(elem.templateString.getStart() < position && elem.templateString.getEnd() > position){
+						ngTemplate = elem;
+						return true;
+					}
+					return false;
+				});
+				return ngTemplate;
+			}
+
+			function getCompletionsAtPosition(fileName: string, pos: number) : ts.CompletionInfo {
+				let sourceFile = getValidSourceFile(fileName);
+
+				// Does it contain an Angular template at the position requested? If not, exit.
+				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+				if(!getTemplateAtPosition(templatesInFile, pos)){
+					return undefined;
+				} else {
+					return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
+				}
+			}
+
+			// TODO
+			function generateCode(originalText: string, templatesInFile: ngTemplateNode[]) : ts.SourceFile {
+				// TODO:
+				return undefined;
+			}
 
 			function getValidSourceFile(fileName: string): ts.SourceFile {
 				fileName = ts.normalizeSlashes(fileName);
 				let getCanonicalFileName = ts.createGetCanonicalFileName(/* useCaseSensitivefileNames */ false);
-				let sourceFile = program.getSourceFile(getCanonicalFileName(fileName));
+				let sourceFile = currentProgram.getSourceFile(getCanonicalFileName(fileName));
 				if (!sourceFile) {
 					throw new Error("Could not find file: '" + fileName + "'.");
 				}
@@ -45,7 +191,7 @@ namespace ngml {
 						let currFunc = currNode as ts.FunctionExpression;
 						// Should have just the one param, __comp
 						if(currFunc.parameters.length == 1 && currFunc.parameters[0].name.getText() === '__comp'){
-							let checker = program.getTypeChecker();
+							let checker = currentProgram.getTypeChecker();
 							let type = checker.getTypeAtLocation(currFunc.parameters[0])
 							let props = type.getProperties();
 							result = result.concat(props);
@@ -66,7 +212,7 @@ namespace ngml {
 				// - For a close tag, return the next expected close tag
 				// - For an attribute name, return the list of properties for the tag type
 				// - For an expression, return the completions for the mapped expression location in the generated code
-				let typeChecker = program.getTypeChecker();
+				let typeChecker = currentProgram.getTypeChecker();
 				let sourceFile = getValidSourceFile(fileName);
 				let currentToken = ts.getTokenAtPosition(sourceFile, position);
 
@@ -236,7 +382,7 @@ namespace ngml {
 				}
 
 				// Get signature help for the location
-				let result = ts.SignatureHelp.getSignatureHelpItems(program, newSourceFile, mappedPos.pointInGenCode, cancellationToken);
+				let result = ts.SignatureHelp.getSignatureHelpItems(currentProgram, newSourceFile, mappedPos.pointInGenCode, cancellationToken);
 				result.applicableSpan.start = mappedPos.startRangeInTemplate + (ngTemplate.templateString.getStart() + 1);
 				result.applicableSpan.length = mappedPos.endRangeInTemplate - mappedPos.startRangeInTemplate;
 				return result;
@@ -303,27 +449,6 @@ namespace ngml {
 				return result;
 			}
 
-			type ngTemplateNode = {templateString: ts.Node, classDecl: ts.Node};
-			function getNgTemplateStringsInSourceFile(sourceFile: ts.SourceFile) : ngTemplateNode[] {
-				let result: ngTemplateNode[] = [];
-
-				// Find each template string in the file
-				ts.forEachChild(sourceFile, visit);
-				function visit(child: ts.Node){
-					if(child.kind === ts.SyntaxKind.FirstTemplateToken){
-						// Ensure it is a Angular template string
-						let classDecl = getNgTemplateClassDecl(child);
-						if(classDecl){
-							result.push({templateString: child, classDecl});
-						}
-					} else {
-						ts.forEachChild(child, visit);
-					}
-				}
-
-				return result;
-			}
-
 			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
 				let result: ts.Diagnostic[] = [];
 
@@ -375,7 +500,7 @@ namespace ngml {
 					let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
 					ts.bindSourceFile(newSourceFile);
 					// TODO: Ensure this file isn't captured anywhere. If it is, we need to clean it up.
-					let newErrs = program.getSemanticDiagnostics(newSourceFile);
+					let newErrs = currentProgram.getSemanticDiagnostics(newSourceFile);
 
 					// Locate the errors specific to the generated code and add to results
 					let endNewText = insertionPoint + generatedFunc.length + 2;
@@ -405,7 +530,8 @@ namespace ngml {
 
 			return {
 				version: "0.1.0",
-				getCompletionsAtPosition: getNgTemplateCompletionsAtPosition,
+				setProgram: (program) => currentProgram = program,
+				getCompletionsAtPosition: getCompletionsAtPosition,
 				getSignatureHelpItems: getNgSignatureHelpItems,
 				getQuickInfoAtPosition: getNgQuickInfoAtPosition,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
@@ -413,42 +539,6 @@ namespace ngml {
 			};
 		});
 	}
-
-    function getNgTemplateClassDecl(currentToken: ts.Node){
-        // Verify we are in a 'template' property assignment, in an object literal, which is an call arg, in a decorator
-        let parentNode = currentToken.parent;  // PropertyAssignment
-        if(!parentNode){
-            return undefined;
-        }
-        if(parentNode.kind !== ts.SyntaxKind.PropertyAssignment){
-            return undefined;
-        } else {
-            // TODO: Is this different for a literal, i.e. a quoted name like "template"
-            if((parentNode as any).name.text !== 'template'){
-                return undefined;
-            }
-        }
-        parentNode = parentNode.parent; // ObjectLiteralExpression
-        if(!parentNode || parentNode.kind !== ts.SyntaxKind.ObjectLiteralExpression){
-            return undefined;
-        }
-
-        parentNode = parentNode.parent; // CallExpression
-        if(!parentNode || parentNode.kind !== ts.SyntaxKind.CallExpression){
-            return undefined;
-        }
-
-        let decorator = parentNode.parent; // Decorator
-        if(!decorator || decorator.kind !== ts.SyntaxKind.Decorator){
-            return undefined;
-        }
-
-        let classDecl = decorator.parent; // ClassDeclaration
-        if(!classDecl || classDecl.kind !== ts.SyntaxKind.ClassDeclaration){
-            return undefined;
-        }
-        return classDecl;
-    }
 
     // TODO: The below are to return a collection of mock completions for now...
     function getElementCompletions(): ts.CompletionEntry[]{

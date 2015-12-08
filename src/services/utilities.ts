@@ -3,6 +3,7 @@
 namespace ts {
     export interface Plugin {
         version: string;
+        setProgram(program: Program): void;
         getCompletionsAtPosition?(fileName: string, position: number): CompletionInfo;
         getSignatureHelpItems?(fileName: string, position: number): SignatureHelpItems;
         getQuickInfoAtPosition?(fileName: string, position: number,  
@@ -12,7 +13,7 @@ namespace ts {
     }
 
     interface PluginFactory {
-        (program: Program, cancellationToken: CancellationToken): Plugin;
+        (cancellationToken: CancellationToken, host: LanguageServiceHost, docRegistry: DocumentRegistry): Plugin;
     }
 
     export var pluginFactories: PluginFactory[] = [];

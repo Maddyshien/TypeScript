@@ -1008,6 +1008,7 @@ namespace ts {
         getScriptFileNames(): string[];
         getScriptVersion(fileName: string): string;
         getScriptSnapshot(fileName: string): IScriptSnapshot;
+        getScriptSourceFile?(fileName: string): SourceFile;
         getLocalizedDiagnosticMessages?(): any;
         getCancellationToken?(): HostCancellationToken;
         getCurrentDirectory(): string;
@@ -2562,11 +2563,11 @@ namespace ts {
         let syntaxTreeCache: SyntaxTreeCache = new SyntaxTreeCache(host);
         let ruleProvider: formatting.RulesProvider;
         let program: Program;
-        let plugins: Plugin[];
         let lastProjectVersion: string;
 
         let useCaseSensitivefileNames = false;
         let cancellationToken = new CancellationTokenObject(host.getCancellationToken && host.getCancellationToken());
+        let plugins: Plugin[] = pluginFactories.map( factory => factory(cancellationToken, host, documentRegistry)).filter(plugin => !!plugin);
 
         // Check if the localized messages json is set, otherwise query the host for it
         if (!localizedDiagnosticMessages && host.getLocalizedDiagnosticMessages) {
@@ -2637,7 +2638,7 @@ namespace ts {
 
             // Now create a new compiler
             let compilerHost: CompilerHost = {
-                getSourceFile: getOrCreateSourceFile,
+                getSourceFile: host.getScriptSourceFile ? host.getScriptSourceFile : getOrCreateSourceFile,
                 getCancellationToken: () => cancellationToken,
                 getCanonicalFileName,
                 useCaseSensitiveFileNames: () => useCaseSensitivefileNames,
@@ -2680,7 +2681,7 @@ namespace ts {
             hostCache = undefined;
 
             program = newProgram;
-            plugins = pluginFactories.map( factory => factory(program, cancellationToken));
+            plugins.forEach( plugin => plugin && plugin.setProgram ? plugin.setProgram(program) : undefined);
 
             // Make sure all the nodes in the program are both bound, and have their parent
             // pointers set property.
@@ -3879,7 +3880,7 @@ namespace ts {
 
             if(!result){
                 plugins.some( plugin => {
-                    if(plugin.getCompletionsAtPosition) {
+                    if(plugin && plugin.getCompletionsAtPosition) {
                         result = plugin.getCompletionsAtPosition(fileName, position);
                     }
                     return !!result;
