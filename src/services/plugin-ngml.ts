@@ -15,7 +15,14 @@ namespace ngml {
 			let currentProgram: ts.Program = null;
 			creatingLanguageServiceFlag = false;
 
-			let filePositionMappings: ts.Map<(position: number) => number> = {};
+			interface MappingFuncs {
+				isPosInTemplate(pos: number): boolean;
+				isPosInGeneratedCode(pos: number): boolean;
+				mapPosFromTemplateToGeneratedCode(pos: number): number;
+				mapPosFromGeneratedCodeToTemplate(pos: number): number;
+			}
+
+			let filePositionMappings: ts.Map<MappingFuncs> = {};
 
 			// The host proxy is used to serve up synthesized source files containing generated code for any source file
 			// that contains an Angular template. It expects all the original source files are already attached to the
@@ -52,8 +59,8 @@ namespace ngml {
 						return originalFile;
 					} else {
 						// Generate the synthesized source file and return that
-						let {generatedFile, getMappedPos} = getGeneratedFile(originalFile, templateStrings);
-						filePositionMappings[fileName] = getMappedPos;
+						let {generatedFile, mappingFuncs} = getGeneratedFile(originalFile, templateStrings);
+						filePositionMappings[fileName] = mappingFuncs;
 						return generatedFile;
 					}
 				}
@@ -145,7 +152,7 @@ namespace ngml {
 					return undefined;
 				} else {
 					if(filePositionMappings[fileName]){
-						pos = filePositionMappings[fileName](pos);
+						pos = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(pos);
 					}
 					return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
 				}
@@ -160,9 +167,33 @@ namespace ngml {
 					return undefined;
 				} else {
 					if(filePositionMappings[fileName]){
-						position = filePositionMappings[fileName](position);
+						position = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(position);
 					}
 					return ngmlLanguageService.getCompletionEntryDetails(fileName, position, entryName);
+				}
+			}
+
+			function getDefinitionAtPosition(fileName: string, position: number): ts.DefinitionInfo[] {
+				let sourceFile = getValidSourceFile(fileName);
+
+				// Does it contain an Angular template at the position requested? If not, exit.
+				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+				if(!getTemplateAtPosition(templatesInFile, position)){
+					return undefined;
+				} else {
+					let mappingInfo = filePositionMappings[fileName];
+					position = mappingInfo.mapPosFromTemplateToGeneratedCode(position);
+					let result = ngmlLanguageService.getDefinitionAtPosition(fileName, position);
+
+					// If the result is in the generated code, map back to the template.
+					if(mappingInfo){
+						result.forEach(mapping => {
+							let startPos = mapping.textSpan.start
+							if(mappingInfo.isPosInGeneratedCode(startPos)){
+								mapping.textSpan.start = mappingInfo.mapPosFromGeneratedCodeToTemplate(startPos);
+							}
+						})
+					}
 				}
 			}
 
@@ -189,22 +220,37 @@ namespace ngml {
 				let endNewText = insertionPoint + generatedFunc.length + 2;
 				let newSourceFile = ts.createSourceFile(originalFile.fileName, newText, originalFile.languageVersion, true);
 
-				let getMappedPos = (position: number) => {
-					let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
-
-					// See if this maps to a location in the generated code
-					let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
-					if(!mappedPos.pointInGenCode) {
-						if(position >= endNewText){
-							position += generatedFunc.length + 2;
+				let mappingFuncs: MappingFuncs = {
+					isPosInTemplate: (position) => position > ngTemplate.templateString.getStart() && position < ngTemplate.templateString.getEnd(),
+					isPosInGeneratedCode: (position) => position > insertionPoint && position < endNewText,
+					mapPosFromGeneratedCodeToTemplate: (position) => {
+						let posOffsetInCodeGen = position - insertionPoint + 1;
+						let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInCodeGen, true);
+						if(!mappedPos.pointInTemplate){
+							// Didn't find it. Just return the start of the template string.
+							return ngTemplate.templateString.getStart() + 1;
+						} else {
+							return mappedPos.pointInTemplate += ngTemplate.templateString.getStart() + 1;
 						}
-						return position;
-					} else {
-						mappedPos.pointInGenCode += insertionPoint + 1;
-						return mappedPos.pointInGenCode;
+					},
+					mapPosFromTemplateToGeneratedCode: (position) => {
+						let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
+
+						// See if this maps to a location in the generated code
+						let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
+						if(!mappedPos.pointInGenCode) {
+							if(position >= endNewText){
+								position += generatedFunc.length + 2;
+							}
+							return position;
+						} else {
+							mappedPos.pointInGenCode += insertionPoint + 1;
+							return mappedPos.pointInGenCode;
+						}
 					}
 				};
-				return {generatedFile: newSourceFile, getMappedPos};
+
+				return {generatedFile: newSourceFile, mappingFuncs};
 			}
 
 			function getValidSourceFile(fileName: string): ts.SourceFile {
@@ -593,6 +639,7 @@ namespace ngml {
 				},
 				getCompletionsAtPosition: getCompletionsAtPosition,
 				getCompletionEntryDetails: getCompletionEntryDetails,
+				getDefinitionAtPosition: getDefinitionAtPosition,
 				getSignatureHelpItems: getNgSignatureHelpItems,
 				getQuickInfoAtPosition: getNgQuickInfoAtPosition,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
@@ -1227,9 +1274,10 @@ namespace ngml {
 						// Add any local names introduced
 						tagNode.attributes.forEach( attrib => {
 							if(attrib.name[0] == '#' && !attrib.value){
-								let attribName = fixupName(attrib.name.substring(1));
 								// TODO: This removes/hides duplicate identifier errors if a local is used twice
-								locals[attribName] = `let ${attribName} = __${tagNode.name};\n`
+								let attribName = fixupName(attrib.name.substring(1));
+								let nameText = `/*{start:${attrib.startPos}}*/${attribName}/*{end:${attrib.startPos + attrib.name.length}}*/`
+								locals[attribName] = `let ${nameText} = __${tagNode.name};\n`
 								names.push(attribName);
 							}
 						});
@@ -1461,12 +1509,14 @@ ${body}})(null);`;
 	// This function is given the generated code with the markers, and a position from the template to try
 	// and location within it. It searches the markers to see if the position from the template maps to a
 	// location in the generated code.
-	function mapPosViaMarkers(input: string, pos: number): CodeMapping {
+	// To do the reverse (map a point in the generated code to the template), is also iterates through the
+	// markers in the generated code, and sees if the point is within a start/end marker span in the generated code.
+	function mapPosViaMarkers(input: string, pos: number, codeToTemplate: boolean = false): CodeMapping {
 		let result: CodeMapping = {
-			pointInTemplate: pos,
+			pointInTemplate: codeToTemplate ? null : pos,
 			startRangeInTemplate: null,
 			endRangeInTemplate: null,
-			pointInGenCode: null,
+			pointInGenCode: codeToTemplate ? pos : null,
 			startRangeInGenCode: null,
 			endRangeInGenCode: null
 		};
@@ -1482,14 +1532,35 @@ ${body}})(null);`;
 			endResult = endMarker.exec(input);
 			let startPos = parseInt(startResult[1]);
 			let endPos = parseInt(endResult[1]);
-			if(pos >= startPos && pos <= endPos){
-				// Found a range that matches.
-				result.pointInGenCode = startMarker.lastIndex + (pos - startPos);
-				result.startRangeInTemplate = startPos;
-				result.endRangeInTemplate = endPos;
-				result.startRangeInGenCode = startMarker.lastIndex;
-				result.endRangeInGenCode = endMarker.lastIndex - (endResult[0].length);
-				break;
+			if(codeToTemplate){
+				// Is the pos within the marker locations?
+				if(pos >= startMarker.lastIndex && pos < endMarker.lastIndex){
+					result.startRangeInTemplate = startPos;
+					result.endRangeInTemplate = endPos;
+					result.startRangeInGenCode = startMarker.lastIndex;
+					result.endRangeInGenCode = endMarker.lastIndex - (endResult[0].length);
+					result.pointInTemplate = startPos + (pos - startMarker.lastIndex);
+					// Ensure we don't overrun the mapping due to renames
+					if(result.pointInTemplate > endPos) {
+						result.pointInTemplate = endPos;
+					}
+					break;
+				}
+			} else {
+				// Is the pos within the marker values?
+				if(pos >= startPos && pos <= endPos){
+					// Found a range that matches.
+					result.pointInGenCode = startMarker.lastIndex + (pos - startPos);
+					result.startRangeInTemplate = startPos;
+					result.endRangeInTemplate = endPos;
+					result.startRangeInGenCode = startMarker.lastIndex;
+					result.endRangeInGenCode = endMarker.lastIndex - (endResult[0].length);
+					// Ensure we don't overrun the mapping due to renames
+					if(result.pointInGenCode > result.endRangeInGenCode) {
+						result.pointInGenCode = result.endRangeInGenCode;
+					}
+					break;
+				}
 			}
 		}
 

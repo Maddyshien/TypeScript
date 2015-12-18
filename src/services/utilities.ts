@@ -6,6 +6,7 @@ namespace ts {
         setProgram(program: Program): void;
         getCompletionsAtPosition?(fileName: string, position: number): CompletionInfo;
         getCompletionEntryDetails?(fileName: string, position: number, entryName: string): CompletionEntryDetails;
+        getDefinitionAtPosition?(fileName: string, position: number): DefinitionInfo[];
         getSignatureHelpItems?(fileName: string, position: number): SignatureHelpItems;
         getQuickInfoAtPosition?(fileName: string, position: number,
                 getQuickInfoAtPosition: (fileName: string, position: number, sourceFile?: SourceFile) => QuickInfo): QuickInfo;

@@ -4663,8 +4663,23 @@ namespace ts {
             }
         }
 
-        /// Goto definition
         function getDefinitionAtPosition(fileName: string, position: number): DefinitionInfo[] {
+            let result = getTSDefinitionAtPosition(fileName, position);
+
+            if(!result){
+                plugins.some( plugin => {
+                    if(plugin && plugin.getDefinitionAtPosition) {
+                        result = plugin.getDefinitionAtPosition(fileName, position);
+                    }
+                    return !!result;
+                });
+            }
+
+            return result;
+        }
+
+        /// Goto definition
+        function getTSDefinitionAtPosition(fileName: string, position: number): DefinitionInfo[] {
             synchronizeHostData();
 
             let sourceFile = getValidSourceFile(fileName);
