@@ -171,6 +171,7 @@ namespace ngml {
 				}
 			}
 
+            // TODO: Consolidate with above getCompletionsAtPosition
 			function getCompletionEntryDetails(fileName: string, position: number, entryName: string): ts.CompletionEntryDetails {
 				let sourceFile = getValidSourceFile(fileName);
 
@@ -505,64 +506,26 @@ namespace ngml {
 			}
 
 			// getQuickInfoAtPosition(fileName: string, position: number): QuickInfo
-			function getNgQuickInfoAtPosition(fileName: string, position: number,
+			function getQuickInfoAtPosition(fileName: string, position: number,
 			 getQuickInfoAtPosition: (fileName: string, position: number, sourceFile?: ts.SourceFile) => ts.QuickInfo): ts.QuickInfo {
-				let result: ts.QuickInfo;
-
-				// TODO: Copied from above function while experimenting. Refactor...
 				let sourceFile = getValidSourceFile(fileName);
 
-				// TODO: There's a lot of cut & paste with getSemanticErrors here. Refactor this out into common code.
-				let ngTemplate: ngTemplateNode = null;
+				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+				if(!getTemplateAtPosition(templatesInFile, position)){
+					return undefined;
+                }
 
-				// Find the first (if any) template string for this position
-				getNgTemplateStringsInSourceFile(sourceFile).some( elem => {
-					if(elem.templateString.getStart() < position && elem.templateString.getEnd() > position){
-						ngTemplate = elem;
-						return true;
+                let mappingInfo = filePositionMappings[fileName];
+                position = mappingInfo.mapPosFromTemplateToGeneratedCode(position);
+                let result = ngmlLanguageService.getQuickInfoAtPosition(fileName, position);
+                if(mappingInfo && result){
+                    let startPos = result.textSpan.start;
+                    if(mappingInfo.isPosInGeneratedCode(startPos)){
+								result.textSpan.start = mappingInfo.mapPosFromGeneratedCodeToTemplate(startPos);
 					}
-					return false;
-				});
+                }
 
-				// If not in a template string, bail out
-				if(!ngTemplate){
-					return undefined;
-				}
-
-				// Generate a source file with the generated template code, and map to the position in that
-				let text = ngTemplate.templateString.getText();
-				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
-				let htmlParser = new NgTemplateParser(text);
-
-				// Get the name of the class and generate the stub function
-				let className = ngTemplate.classDecl.symbol.name;
-				let generatedFunc = generateFunction(htmlParser.ast, className);
-
-				// Generate a source file with the injected content and get errors on it
-				let insertionPoint = ngTemplate.classDecl.getEnd();
-				let oldText = sourceFile.getText();
-				let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
-				let endNewText = insertionPoint + generatedFunc.length + 2;
-				let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
-				ts.bindSourceFile(newSourceFile);
-
-				// Find if there is a range in the generated code that maps the current position in the template
-				// The offset into the template is the current position - the template text start position
-				let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
-
-				// See if this maps to a location in the generated code
-				let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
-				if(mappedPos.pointInGenCode < 0) {
-					return undefined;
-				} else {
-					mappedPos.pointInGenCode += insertionPoint + 1;
-				}
-
-				result = getQuickInfoAtPosition(null, mappedPos.pointInGenCode, newSourceFile);
-				result.textSpan.start = mappedPos.startRangeInTemplate + (ngTemplate.templateString.getStart() + 1);
-				result.textSpan.length = mappedPos.endRangeInTemplate - mappedPos.startRangeInTemplate;
-				// TODO: Update span in returned info
-				return result;
+                return result;
 			}
 
 			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
@@ -650,11 +613,11 @@ namespace ngml {
 					currentProgram = program;
 					ngmlLanguageService.getProgram(); // Trigger a recalculation to update mapping funcs
 				},
-				getCompletionsAtPosition: getCompletionsAtPosition,
-				getCompletionEntryDetails: getCompletionEntryDetails,
+				getCompletionsAtPosition,
+				getCompletionEntryDetails,
+				getQuickInfoAtPosition,
 				getDefinitionAtPosition: getDefinitionAtPosition,
 				getSignatureHelpItems: getNgSignatureHelpItems,
-				getQuickInfoAtPosition: getNgQuickInfoAtPosition,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
 				getSemanticDiagnostics: getNgSemanticDiagnostics
 			};

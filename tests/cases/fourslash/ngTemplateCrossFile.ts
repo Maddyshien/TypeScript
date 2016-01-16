@@ -48,4 +48,4 @@ verify.memberListContains('firstName');
 verify.not.memberListContains('name');
 
 goTo.marker('tip');
-verify.quickInfoIs('foo.name');
+verify.quickInfoIs('(method) Foo.getName(): string');
