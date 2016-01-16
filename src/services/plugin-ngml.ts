@@ -348,6 +348,15 @@ namespace ngml {
 
 				let elements: ts.CompletionEntry[];
 
+                function getExpressionCompletions(text: string, pos: number){
+                    if(isAfterDot(text, pos)){
+						return queryGeneratedCode(fileName, position).entries;
+					} else {
+                              // TODO: Should include locally introduced names also (e.g. #player)
+						return getClassMembers(typeChecker, templateNode.classDecl);
+					}
+                }
+
 				switch(currNode.kind){
 					case ngNodeKind.StartTag:
 					case ngNodeKind.SelfClosingTag:
@@ -374,12 +383,7 @@ namespace ngml {
 							// If we're after a '.', delegate to getCompletions for the location in the generated code
 							let attribValue = (currNode as NgAttrib).value;
 							let attribPos = posInTemplate - (currNode as NgAttrib).valuePos;
-							if(isAfterDot(attribValue, attribPos)){
-								elements = queryGeneratedCode(fileName, position).entries;
-							} else {
-                                // TODO: Should include locally introduced names also (e.g. #player)
-								elements = getClassMembers(typeChecker, templateNode.classDecl);
-							}
+                            elements = getExpressionCompletions(attribValue, attribPos);
 						} else if((currNode as NgAttrib).name[0] === '*'){
 							elements = getDirectiveCompletions();
 						} else {
@@ -430,7 +434,9 @@ namespace ngml {
 						}
 						break;
 					case ngNodeKind.Interpolation:
-						elements = getClassMembers(typeChecker, templateNode.classDecl);
+						let interpText = (currNode as NgNode).getText().substring(2);
+						let pos = posInTemplate - currNode.startPos - 2;
+                        elements = getExpressionCompletions(interpText, pos);
 						break;
 				}
 
