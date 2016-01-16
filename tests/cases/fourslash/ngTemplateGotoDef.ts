@@ -20,3 +20,4 @@
 
 goTo.marker("1");
 goTo.definition();
+verify.textAtCaretIs("#mydiv");

@@ -27,7 +27,7 @@
 //// import {Foo} from "./myexports"
 ////
 //// @Component({
-//// 	template: `<div [title]='foo./*memb*/'></div>`
+//// 	template: `<div [title]='foo./*memb*/' [innerText]='foo.ge/*tip*/tName()'></div>`
 //// })
 //// class Comp{
 //// 	foo: Foo;
@@ -46,3 +46,6 @@ edit.insert('firstName');
 goTo.marker('memb');
 verify.memberListContains('firstName');
 verify.not.memberListContains('name');
+
+goTo.marker('tip');
+verify.quickInfoIs('foo.name');

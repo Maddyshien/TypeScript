@@ -238,7 +238,7 @@ namespace ngml {
 					isPosInTemplate: (position) => position > ngTemplate.templateString.getStart() && position < ngTemplate.templateString.getEnd(),
 					isPosInGeneratedCode: (position) => position > insertionPoint && position < endNewText,
 					mapPosFromGeneratedCodeToTemplate: (position) => {
-						let posOffsetInCodeGen = position - insertionPoint + 1;
+						let posOffsetInCodeGen = position - insertionPoint - 1;
 						let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInCodeGen, true);
 						if(mappedPos.pointInTemplate === -1){
 							// Didn't find it. Just return the start of the template string.
@@ -672,7 +672,7 @@ namespace ngml {
     }
 
     function getDirectiveCompletions(): ts.CompletionEntry[]{
-        return ["ng-for", "ng-if", "ng-switch"].map( name => ({
+        return ["ngFor", "ngIf", "ngSwitch"].map( name => ({
                 name,
                 kind: ts.ScriptElementKind.keyword,
                 kindModifiers: "",

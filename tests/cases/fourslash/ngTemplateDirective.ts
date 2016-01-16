@@ -8,7 +8,7 @@
 ////}
 
 goTo.marker();
-verify.memberListContains('ng-for');
-verify.memberListContains('ng-if');
+verify.memberListContains('ngFor');
+verify.memberListContains('ngIf');
 verify.not.memberListContains('p');
 verify.not.memberListContains('div');
