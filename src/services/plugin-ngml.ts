@@ -482,7 +482,9 @@ namespace ngml {
                 return result;
 			}
 
-			function getNgSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
+            // Probably can't use the generated code here, as there is so much Angular2 specific syntax even in expressions.
+            // The parser will need to detect and add such errors directly.
+			function getSyntacticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
 				let result: ts.Diagnostic[] = [];
 
 				getNgTemplateStringsInSourceFile(sourceFile).forEach( elem => {
@@ -511,54 +513,25 @@ namespace ngml {
 				return result;
 			}
 
-			function getNgSemanticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
-				let result: ts.Diagnostic[] = [];
+			function getSemanticDiagnostics(sourceFile: ts.SourceFile): ts.Diagnostic[]{
+				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+                if(!templatesInFile.length) {
+                    return [];
+                }
 
-				getNgTemplateStringsInSourceFile(sourceFile).forEach( elem => getSemanticErrors(elem));
+                let fileName = sourceFile.fileName;
+                let mappingInfo = filePositionMappings[fileName];
 
-				function getSemanticErrors(ngTemplate: ngTemplateNode){
-					// Get the AST for the HTML
-					let text = ngTemplate.templateString.getText();
-					text = text.substring(1, text.length - 1);
-					let htmlParser = new NgTemplateParser(text);
-
-					// Get the name of the class and generate the stub function
-					let className = ngTemplate.classDecl.symbol.name;
-					let generatedFunc = generateFunction(htmlParser.ast, className);
-
-					// Generate a source file with the injected content and get errors on it
-					let insertionPoint = ngTemplate.classDecl.end;
-					let oldText = sourceFile.getText();
-					let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
-					let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
-					ts.bindSourceFile(newSourceFile);
-					// TODO: Ensure this file isn't captured anywhere. If it is, we need to clean it up.
-					let newErrs = currentProgram.getSemanticDiagnostics(newSourceFile);
-
-					// Locate the errors specific to the generated code and add to results
-					let endNewText = insertionPoint + generatedFunc.length + 2;
-					newErrs.forEach( err => {
-						if(err.start > insertionPoint && err.start < endNewText){
-							let templateStart = ngTemplate.templateString.pos + 2;
-							// Map the error position to an offset in the generated function
-							let errorPos = err.start - (insertionPoint + 1);
-							let mappedPos = findFirstOverlap(generatedFunc, errorPos, errorPos + err.length);
-							if(mappedPos){
-								// If it mapped, map it to the template location in the file
-								err.start = mappedPos.startRange;
-								err.length = mappedPos.endRange - mappedPos.startRange;
-								err.start += ngTemplate.templateString.pos + 2;
-							} else {
-								// Else span the whole template
-								err.start = ngTemplate.templateString.pos + 2;
-								err.length = text.length;
-							}
-
-							result.push(err);
-						}
-					});
-				}
-				return result;
+                let result = ngmlLanguageService.getSemanticDiagnostics(fileName);
+                if(result && mappingInfo){
+                    result.forEach( elem => {
+                        let startPos = elem.start;
+                        if(mappingInfo.isPosInGeneratedCode(startPos)){
+					       	elem.start = mappingInfo.mapPosFromGeneratedCodeToTemplate(startPos);
+					    }
+                    });
+                }
+                return result;
 			}
 
 			return {
@@ -572,8 +545,8 @@ namespace ngml {
 				getQuickInfoAtPosition,
 				getDefinitionAtPosition,
 				getSignatureHelpItems,
-				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
-				getSemanticDiagnostics: getNgSemanticDiagnostics
+				getSyntacticDiagnostics,
+				getSemanticDiagnostics
 			};
 		});
 	}
