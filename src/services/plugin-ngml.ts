@@ -143,35 +143,25 @@ namespace ngml {
 				return ngTemplate;
 			}
 
-			function getCompletionsAtPosition(fileName: string, pos: number) : ts.CompletionInfo {
+			function getCompletionsAtPosition(fileName: string, position: number) : ts.CompletionInfo {
 				let sourceFile = getValidSourceFile(fileName);
 
 				// Does it contain an Angular template at the position requested? If not, exit.
 				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
-                let templateNode = getTemplateAtPosition(templatesInFile, pos);
-				if(!templateNode){
+                if(!getTemplateAtPosition(templatesInFile, position)){
 					return undefined;
-				} else {
-                    // Check what node we're on in the template to determine if we need to delegate
-                    // to the generated code, or just return an element or directive list, etc.
-                    let text = templateNode.templateString.getText();
-				    text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
-				    let htmlParser = new NgTemplateParser(text);
-                    let posInTemplate = pos - (templateNode.templateString.getStart() + 1)
-				    let currNode = htmlParser.getNodeAtPosition(posInTemplate);
+                }
 
-                    let queryGeneratedCode = (fileName: string, pos: number) => {
-                        if(filePositionMappings[fileName]){
-					   	   pos = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(pos);
-					    }
-                        return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
+                let queryGeneratedCode = (fileName: string, pos: number) => {
+                    if(filePositionMappings[fileName]){
+                        pos = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(pos);
                     }
+                    return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
+                }
 
-                    return getNgTemplateCompletionsAtPosition(fileName, pos, queryGeneratedCode);
-				}
+                return getNgTemplateCompletionsAtPosition(fileName, position, queryGeneratedCode);
 			}
 
-            // TODO: Consolidate with above getCompletionsAtPosition
 			function getCompletionEntryDetails(fileName: string, position: number, entryName: string): ts.CompletionEntryDetails {
 				let sourceFile = getValidSourceFile(fileName);
 
@@ -179,12 +169,13 @@ namespace ngml {
 				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
 				if(!getTemplateAtPosition(templatesInFile, position)){
 					return undefined;
-				} else {
-					if(filePositionMappings[fileName]){
-						position = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(position);
-					}
-					return ngmlLanguageService.getCompletionEntryDetails(fileName, position, entryName);
 				}
+
+                if(filePositionMappings[fileName]){
+                    position = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(position);
+                }
+                // TODO: See above getCompletionsAtPosition to see handling details for items not in the generated code (e.g. elements)
+                return ngmlLanguageService.getCompletionEntryDetails(fileName, position, entryName);
 			}
 
 			function getDefinitionAtPosition(fileName: string, position: number): ts.DefinitionInfo[] {
@@ -449,65 +440,28 @@ namespace ngml {
 				return result;
 			}
 
-			function getNgSignatureHelpItems(fileName: string, position: number): ts.SignatureHelpItems{
+			function getSignatureHelpItems(fileName: string, position: number): ts.SignatureHelpItems{
 				let sourceFile = getValidSourceFile(fileName);
 
-				// TODO: There's a lot of cut & paste with getSemanticErrors here. Refactor this out into common code.
-				let ngTemplate: ngTemplateNode = null;
+				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+				if(!getTemplateAtPosition(templatesInFile, position)){
+					return undefined;
+                }
 
-				// Find the first (if any) template string for this position
-				getNgTemplateStringsInSourceFile(sourceFile).some( elem => {
-					if(elem.templateString.getStart() < position && elem.templateString.getEnd() > position){
-						ngTemplate = elem;
-						return true;
+                let mappingInfo = filePositionMappings[fileName];
+                position = mappingInfo.mapPosFromTemplateToGeneratedCode(position);
+                let result = ngmlLanguageService.getSignatureHelpItems(fileName, position);
+                if(mappingInfo && result){
+                    let startPos = result.applicableSpan.start;
+                    if(mappingInfo.isPosInGeneratedCode(startPos)){
+						result.applicableSpan.start = mappingInfo.mapPosFromGeneratedCodeToTemplate(startPos);
 					}
-					return false;
-				});
+                }
 
-				// If not in a template string, bail out
-				if(!ngTemplate){
-					return undefined;
-				}
-
-				// Generate a source file with the generated template code, and map to the position in that
-				let text = ngTemplate.templateString.getText();
-				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
-				let htmlParser = new NgTemplateParser(text);
-
-				// Get the name of the class and generate the stub function
-				let className = ngTemplate.classDecl.symbol.name;
-				let generatedFunc = generateFunction(htmlParser.ast, className);
-
-				// Generate a source file with the injected content and get errors on it
-				let insertionPoint = ngTemplate.classDecl.getEnd();
-				let oldText = sourceFile.getText();
-				let newText = `${oldText.substring(0, insertionPoint)}\n${generatedFunc}\n${oldText.substring(insertionPoint)}`;
-				let endNewText = insertionPoint + generatedFunc.length + 2;
-				let newSourceFile = ts.createSourceFile(sourceFile.fileName + '_generated.ts', newText, ts.ScriptTarget.Latest, true);
-				ts.bindSourceFile(newSourceFile);
-
-				// Find if there is a range in the generated code that maps the current position in the template
-				// The offset into the template is the current position - the template text start position
-				let posOffsetInTemplate = position - (ngTemplate.templateString.getStart() + 1);
-
-				// See if this maps to a location in the generated code
-				let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
-				if(mappedPos.pointInGenCode < 0) {
-					return undefined;
-				} else {
-					mappedPos.pointInGenCode += insertionPoint + 1;
-				}
-
-				// Get signature help for the location
-				let result = ts.SignatureHelp.getSignatureHelpItems(currentProgram, newSourceFile, mappedPos.pointInGenCode, cancellationToken);
-				result.applicableSpan.start = mappedPos.startRangeInTemplate + (ngTemplate.templateString.getStart() + 1);
-				result.applicableSpan.length = mappedPos.endRangeInTemplate - mappedPos.startRangeInTemplate;
-				return result;
+                return result;
 			}
 
-			// getQuickInfoAtPosition(fileName: string, position: number): QuickInfo
-			function getQuickInfoAtPosition(fileName: string, position: number,
-			 getQuickInfoAtPosition: (fileName: string, position: number, sourceFile?: ts.SourceFile) => ts.QuickInfo): ts.QuickInfo {
+			function getQuickInfoAtPosition(fileName: string, position: number): ts.QuickInfo {
 				let sourceFile = getValidSourceFile(fileName);
 
 				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
@@ -521,7 +475,7 @@ namespace ngml {
                 if(mappingInfo && result){
                     let startPos = result.textSpan.start;
                     if(mappingInfo.isPosInGeneratedCode(startPos)){
-								result.textSpan.start = mappingInfo.mapPosFromGeneratedCodeToTemplate(startPos);
+						result.textSpan.start = mappingInfo.mapPosFromGeneratedCodeToTemplate(startPos);
 					}
                 }
 
@@ -616,8 +570,8 @@ namespace ngml {
 				getCompletionsAtPosition,
 				getCompletionEntryDetails,
 				getQuickInfoAtPosition,
-				getDefinitionAtPosition: getDefinitionAtPosition,
-				getSignatureHelpItems: getNgSignatureHelpItems,
+				getDefinitionAtPosition,
+				getSignatureHelpItems,
 				getSyntacticDiagnostics: getNgSyntacticDiagnostics,
 				getSemanticDiagnostics: getNgSemanticDiagnostics
 			};
