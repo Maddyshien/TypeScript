@@ -148,13 +148,26 @@ namespace ngml {
 
 				// Does it contain an Angular template at the position requested? If not, exit.
 				let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
-				if(!getTemplateAtPosition(templatesInFile, pos)){
+                let templateNode = getTemplateAtPosition(templatesInFile, pos);
+				if(!templateNode){
 					return undefined;
 				} else {
-					if(filePositionMappings[fileName]){
-						pos = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(pos);
-					}
-					return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
+                    // Check what node we're on in the template to determine if we need to delegate
+                    // to the generated code, or just return an element or directive list, etc.
+                    let text = templateNode.templateString.getText();
+				    text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
+				    let htmlParser = new NgTemplateParser(text);
+                    let posInTemplate = pos - (templateNode.templateString.getStart() + 1)
+				    let currNode = htmlParser.getNodeAtPosition(posInTemplate);
+
+                    let queryGeneratedCode = (fileName: string, pos: number) => {
+                        if(filePositionMappings[fileName]){
+					   	   pos = filePositionMappings[fileName].mapPosFromTemplateToGeneratedCode(pos);
+					    }
+                        return ngmlLanguageService.getCompletionsAtPosition(fileName, pos);
+                    }
+
+                    return getNgTemplateCompletionsAtPosition(fileName, pos, queryGeneratedCode);
 				}
 			}
 
@@ -186,7 +199,7 @@ namespace ngml {
 					let result = ngmlLanguageService.getDefinitionAtPosition(fileName, position);
 
 					// If the result is in the generated code, map back to the template.
-					if(mappingInfo){
+					if(mappingInfo && result){
 						result.forEach(mapping => {
 							let startPos = mapping.textSpan.start
 							if(mappingInfo.isPosInGeneratedCode(startPos)){
@@ -194,6 +207,7 @@ namespace ngml {
 							}
 						})
 					}
+                    return result;
 				}
 			}
 
@@ -226,7 +240,7 @@ namespace ngml {
 					mapPosFromGeneratedCodeToTemplate: (position) => {
 						let posOffsetInCodeGen = position - insertionPoint + 1;
 						let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInCodeGen, true);
-						if(!mappedPos.pointInTemplate){
+						if(mappedPos.pointInTemplate === -1){
 							// Didn't find it. Just return the start of the template string.
 							return ngTemplate.templateString.getStart() + 1;
 						} else {
@@ -238,7 +252,7 @@ namespace ngml {
 
 						// See if this maps to a location in the generated code
 						let mappedPos = mapPosViaMarkers(generatedFunc, posOffsetInTemplate);
-						if(!mappedPos.pointInGenCode) {
+						if(mappedPos.pointInGenCode === -1) {
 							if(position >= endNewText){
 								position += generatedFunc.length + 2;
 							}
@@ -307,7 +321,8 @@ namespace ngml {
 				return result;
 			}
 
-			function getNgTemplateCompletionsAtPosition(fileName: string, position: number): ts.CompletionInfo {
+			function getNgTemplateCompletionsAtPosition(fileName: string, position: number,
+                            queryGeneratedCode: (fileName: string, pos: number) => ts.CompletionInfo): ts.CompletionInfo {
 				// This function should:
 				// - Check it is in a template string
 				// - If so, see if it is in a start tag name, attribute name, expression, or close tag.
@@ -317,25 +332,18 @@ namespace ngml {
 				// - For an expression, return the completions for the mapped expression location in the generated code
 				let typeChecker = currentProgram.getTypeChecker();
 				let sourceFile = getValidSourceFile(fileName);
-				let currentToken = ts.getTokenAtPosition(sourceFile, position);
 
-				// Only execute if in a template string
-				// TODO: Probably needs to handle multi-part tokens (e.g. contains expressions)
-				if(currentToken.kind !== ts.SyntaxKind.FirstTemplateToken){
-					return undefined;
-				}
-
-				// Ensure this template string is set up as per an Angular template
-				let classDecl = getNgTemplateClassDecl(currentToken);
-				if(!classDecl) {
+                let templatesInFile = getNgTemplateStringsInSourceFile(sourceFile);
+                let templateNode = getTemplateAtPosition(templatesInFile, position);
+				if(!templateNode){
 					return undefined;
 				}
 
 				// Parse the template string into an AST and see what position we're in
-				let text = currentToken.getText();
+				let text = templateNode.templateString.getText();
 				text = text.substring(1, text.length - 1); // Strip the surrounding back-ticks
 				let htmlParser = new NgTemplateParser(text);
-				let posInTemplate = position - (currentToken.getStart() + 1)
+				let posInTemplate = position - (templateNode.templateString.getStart() + 1)
 				let currNode = htmlParser.getNodeAtPosition(posInTemplate);
 
 				let elements: ts.CompletionEntry[];
@@ -367,10 +375,10 @@ namespace ngml {
 							let attribValue = (currNode as NgAttrib).value;
 							let attribPos = posInTemplate - (currNode as NgAttrib).valuePos;
 							if(isAfterDot(attribValue, attribPos)){
-								// TODO: Get completions from the generated function.
-								elements = getClassMembers(typeChecker, classDecl);
+								elements = queryGeneratedCode(fileName, position).entries;
 							} else {
-								elements = getClassMembers(typeChecker, classDecl);
+                                // TODO: Should include locally introduced names also (e.g. #player)
+								elements = getClassMembers(typeChecker, templateNode.classDecl);
 							}
 						} else if((currNode as NgAttrib).name[0] === '*'){
 							elements = getDirectiveCompletions();
@@ -381,10 +389,10 @@ namespace ngml {
 								elements = getDummyCompletions();
 								break;
 							}
-							// HTMLDivElement etc. are declared as variables
 
+							// HTMLDivElement etc. are declared as variables
 							// TODO: Handle custom elements, which will be classes
-							let inScopeSymbols = typeChecker.getSymbolsInScope(currentToken, ts.SymbolFlags.Interface);
+							let inScopeSymbols = typeChecker.getSymbolsInScope(templateNode.templateString, ts.SymbolFlags.Interface);
 							if(!inScopeSymbols || inScopeSymbols.length == 0){
 								elements = getDummyCompletions();
 								break;
@@ -409,13 +417,12 @@ namespace ngml {
 											}
 											return false;
 										});
-									} else {
-										// Snakify
-										elements.forEach( elem => {
-											elem.name = snakify(elem.name);
-										});
 									}
-									return true;
+                                    // Filter data bindings to only be data properties, not methods/event handlers
+                                    if((currNode as NgAttrib).name[0] === '['){
+										elements = elements.filter( elem => (elem.kind === ts.ScriptElementKind.memberVariableElement));
+									}
+                                    return true;
 								}
 							})){
 								elements = getDummyCompletions();
@@ -423,7 +430,7 @@ namespace ngml {
 						}
 						break;
 					case ngNodeKind.Interpolation:
-						elements = getClassMembers(typeChecker, classDecl);
+						elements = getClassMembers(typeChecker, templateNode.classDecl);
 						break;
 				}
 
@@ -679,7 +686,7 @@ namespace ngml {
 	// Detect if we're in a member completion position, rather than an identifier
 	// TODO: Crude logic.
 	function isAfterDot(expr: string, pos: number): boolean {
-		while(--pos > expr.length){
+		while(--pos > 0){
 			if(expr[pos] === '.') return true;
 			if(!ts.isIdentifierPart(expr.charCodeAt(pos), ts.ScriptTarget.ES2015)) {
 				return false;
@@ -1226,27 +1233,6 @@ namespace ngml {
 		}
 	}
 
-	function snakify(name: string) : string {
-		// Convert an underscores to dashes
-		name = name.replace(/_/g, "-");
-		// There are several all upper-case names, just lowercase these.
-		if(name.toUpperCase() === name) return name.toLowerCase();
-
-		name = name.replace(/HTML/g, "Html");
-		name = name.replace(/URI/g, "Uri");
-		name = name.replace(/NS/g, "Ns");
-
-		let result = "";
-		for(let i = 0; i < name.length; i++){
-			if(name[i] === name[i].toUpperCase()){
-				result += "-" + name[i].toLowerCase();
-			} else {
-				result += name[i];
-			}
-		}
-		return result;
-	}
-
 	function generateFunction(ast: NgNode, componentType: string): string {
 		type nameTable = string[]; // Maps name to type
 		var availableGlobals: nameTable = []; // None, I believe.
@@ -1334,21 +1320,7 @@ namespace ngml {
 			}
 
 			function fixupName(name: string, isEvent: boolean = false) : string {
-				let result = "";
-				if(name == 'innerHtml') return 'innerHTML'; // Special case
-
-				// De-snake
-				let i = 0;
-				let upperNext = false;
-				while(i < name.length){
-					if(name[i] == '-'){
-						upperNext = true;
-					} else {
-						result += (upperNext ? name[i].toUpperCase() : name[i]);
-						upperNext = false;
-					}
-					i++;
-				}
+				let result = name;
 				if(isEvent){
 					result = 'on' + result;
 				}
@@ -1513,12 +1485,12 @@ ${body}})(null);`;
 	// markers in the generated code, and sees if the point is within a start/end marker span in the generated code.
 	function mapPosViaMarkers(input: string, pos: number, codeToTemplate: boolean = false): CodeMapping {
 		let result: CodeMapping = {
-			pointInTemplate: codeToTemplate ? null : pos,
-			startRangeInTemplate: null,
-			endRangeInTemplate: null,
-			pointInGenCode: codeToTemplate ? pos : null,
-			startRangeInGenCode: null,
-			endRangeInGenCode: null
+			pointInTemplate: codeToTemplate ? -1 : pos,
+			startRangeInTemplate: -1,
+			endRangeInTemplate: -1,
+			pointInGenCode: codeToTemplate ? pos : -1,
+			startRangeInGenCode: -1,
+			endRangeInGenCode: -1
 		};
 
 		// We want to find the start/end markers separately to easily get lastIndexOf as the first position after the start marker
@@ -1730,19 +1702,19 @@ ${body}})(null);`;
 })(null);`;
 		assert(result == expected);
 
-		tmp = new NgTemplateParser("<div (click-handler)='handleClick($event)' [text-content]='data'>Test</div>");
+		tmp = new NgTemplateParser("<div (clickHandler)='handleClick($event)' [textContent]='data'>Test</div>");
 		result = generateFunction(tmp.ast, 'MyComp');
 		expected = `(function(__comp: MyComp){
   let __div = new HTMLDivElement();
   {
-    __div./*{start:6}*/onclickHandler/*{end:19}*/ = $event => __comp./*{start:22}*/handleClick($event)/*{end:41}*/;
-    __div./*{start:44}*/textContent/*{end:56}*/ = __comp./*{start:59}*/data/*{end:63}*/;
+    __div./*{start:6}*/onclickHandler/*{end:18}*/ = $event => __comp./*{start:21}*/handleClick($event)/*{end:40}*/;
+    __div./*{start:43}*/textContent/*{end:54}*/ = __comp./*{start:57}*/data/*{end:61}*/;
   }
 })(null);`;
 		assert(result == expected);
 
 		tmp = new NgTemplateParser(`
-<player #my-player/>
+<player #myPlayer/>
 <button (click)='myPlayer.play()'>Play</button>`);
 		result = generateFunction(tmp.ast, 'MyComp');
 		result = stripMarkers(result);
@@ -1759,7 +1731,7 @@ ${body}})(null);`;
 
 		tmp = new NgTemplateParser(`<div [style]='divStyle'>
   <h1 #myHeader>{{greeting}}</h1>
-  <p (hover)='hide(myHeader)' [text-content]='myHeader.value'></p>
+  <p (hover)='hide(myHeader)' [textContent]='myHeader.value'></p>
 </div>`);
 		result = generateFunction(tmp.ast, 'MyComp');
 		result = stripMarkers(result);
@@ -1802,11 +1774,11 @@ ${body}})(null);`;
 		assert((nodeAtPos as NgAttrib).name === '(click)');
 
 		let mappedPos = mapPosViaMarkers(result, 5);
-		assert(mappedPos.pointInTemplate === -1);
+		assert(mappedPos.pointInGenCode === -1);
 
 		// Check cursor in input at [s|tyle] maps to generated at __div.s|tyle
 		mappedPos = mapPosViaMarkers(result, 7);
-		assert(mappedPos.pointInTemplate === 136);
+		assert(mappedPos.pointInGenCode === 136);
 
 		// Check an error range in the generated text maps to the template
 		let interpStart = result.indexOf("(__comp.") + 1;
@@ -1861,7 +1833,6 @@ ${body}})(null);`;
 		       Add <name> to nameTable.
 		     For every non-directive attribute:
 		       Call 'bindExpr' on <value> to rebind expressions, and 'fixName' on <name> to fixup names (snake-case to mixed-case).
-		         Note: Snake-case special cases, e.g. innerHTML -> inner-html).
 		         Note: This handles regular attributes differently, and only extracts/binds interpolations and embeds in "(...);".
 		         Note: Needs to embed interpol expressions in "(..);" as they may be object literals, and will be expression statements.
 		       If it's a data binding, emit as: __<tag>.<fixedname> = <boundExpr>;

@@ -105,11 +105,11 @@ goTo.marker('close');
 verify.memberListContains('div');
 verify.not.memberListContains('onclick');
 verify.not.memberListContains('h1');
-verify.not.memberListContains('get-name');
+verify.not.memberListContains('getName');
 
 goTo.marker('prop');
 verify.memberListContains('children');
-verify.memberListContains('class-name');
+verify.memberListContains('className');
 verify.not.memberListContains('div');
 verify.not.memberListContains('getName');
 
